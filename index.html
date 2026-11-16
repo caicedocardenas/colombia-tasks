@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Colombia Tasks" />
+  <meta name="theme-color" content="#020617" />
   <title>Colombia Personal Commitment & Task Manager</title>
 
   <!-- Tailwind CSS -->
@@ -25,15 +26,43 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <style>
+    :root {
+      --sat: env(safe-area-inset-top, 0px);
+      --sab: env(safe-area-inset-bottom, 0px);
+    }
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
       background-color: #020617;
       color: #f1f5f9;
       -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: none;
     }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0f172a; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .ios-header-safe {
+      padding-top: max(12px, env(safe-area-inset-top));
+    }
+    .ios-bottom-bar-safe {
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+    }
+    .ios-main-safe {
+      padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    }
+    .ios-modal-safe {
+      padding-bottom: max(20px, env(safe-area-inset-bottom));
+    }
+    /* Prevent iOS Safari auto-zoom on form focus */
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+    @keyframes slideUpSheet {
+      from { transform: translateY(100%); opacity: 0.6; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-sheet {
+      animation: slideUpSheet 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-slate-950">
@@ -68,18 +97,14 @@
       return <span ref={spanRef} className="inline-flex items-center justify-center shrink-0" />;
     }
 
-    // Safe Firebase Config Parser (handles raw JS snippets, quoted/unquoted keys, URLs, trailing commas)
     function parseFirebaseConfigInput(rawInput) {
       if (!rawInput || !rawInput.trim()) return null;
       const trimmed = rawInput.trim();
-
-      // 1. Try direct JSON.parse first
       try {
         const parsed = JSON.parse(trimmed);
         if (parsed && parsed.apiKey && parsed.projectId) return parsed;
       } catch (e) {}
 
-      // 2. Extract known Firebase keys safely via regex without corrupting URLs
       const keys = ['apiKey', 'authDomain', 'databaseURL', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'measurementId'];
       const extracted = {};
       keys.forEach(key => {
@@ -93,20 +118,21 @@
       if (extracted.apiKey && extracted.projectId) {
         return extracted;
       }
-
       return null;
     }
 
     const DOMAINS = {
-      PROPERTIES: { id: 'PROPERTIES', label: 'Properties', icon: 'building-2', color: '#10b981', bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' },
-      BUSINESSES: { id: 'BUSINESSES', label: 'Businesses', icon: 'briefcase', color: '#3b82f6', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/30' },
-      COMMITMENTS: { id: 'COMMITMENTS', label: 'Legal & Financial', icon: 'file-text', color: '#f59e0b', bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
-      FAMILY: { id: 'FAMILY', label: 'Family in Colombia', icon: 'users', color: '#ec4899', bg: 'bg-pink-500/10', text: 'text-pink-400', border: 'border-pink-500/30' }
+      PROPERTIES: { id: 'PROPERTIES', label: 'Properties', shortLabel: 'Properties', icon: 'building-2', color: '#10b981', bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+      BUSINESSES: { id: 'BUSINESSES', label: 'Businesses', shortLabel: 'Business', icon: 'briefcase', color: '#3b82f6', bg: 'bg-blue-500/15', text: 'text-blue-400', border: 'border-blue-500/30' },
+      COMMITMENTS: { id: 'COMMITMENTS', label: 'Legal & Financial', shortLabel: 'Legal', icon: 'file-text', color: '#f59e0b', bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/30' },
+      FAMILY: { id: 'FAMILY', label: 'Family in Colombia', shortLabel: 'Family', icon: 'users', color: '#ec4899', bg: 'bg-pink-500/15', text: 'text-pink-400', border: 'border-pink-500/30' }
     };
+
+    const PROPERTY_PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
 
     const RECURRENCE_TYPES = {
       NONE: { label: 'One-Time / Ad-Hoc', months: 0 },
-      MONTHLY: { label: 'Monthly (1 mo)', months: 1 },
+      MONTHLY: { label: 'Monthly (Every 1 mo)', months: 1 },
       BI_MONTHLY: { label: 'Bi-Monthly (Every 2 mo)', months: 2 },
       QUARTERLY: { label: 'Quarterly (Every 3 mo)', months: 3 },
       SEMI_ANNUAL: { label: 'Semi-Annual (Every 6 mo)', months: 6 },
@@ -167,9 +193,17 @@
       return new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        minimumFractionDigits: 0,
+        maximumFractionDigits: value < 100 ? 2 : 0
       }).format(value);
+    }
+
+    function formatCompactCurrency(amountCOP, currency, rates) {
+      const rate = rates[currency] || 1;
+      const val = (amountCOP || 0) * rate;
+      if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+      if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
+      return `${val.toFixed(0)}`;
     }
 
     function downloadCSV(csvContent, fileName) {
@@ -419,11 +453,15 @@
       const [fxRates] = useState(DEFAULT_FX_RATES);
       const [activeTab, setActiveTab] = useState('dashboard');
       const [projectionsGroupMode, setProjectionsGroupMode] = useState('PILLAR');
+      const [selectedForecastMonthIdx, setSelectedForecastMonthIdx] = useState(0);
+      const [exposureSelectedDate, setExposureSelectedDate] = useState(() => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+      });
 
       const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date());
       const [selectedCalendarDay, setSelectedCalendarDay] = useState(new Date().getDate());
 
-      const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editingTask, setEditingTask] = useState(null);
       const [isPresetsOpen, setIsPresetsOpen] = useState(false);
@@ -437,10 +475,10 @@
 
       const showToast = (msg, type = 'info') => {
         setToastMessage({ msg, type });
-        setTimeout(() => setToastMessage(null), 4000);
+        setTimeout(() => setToastMessage(null), 3500);
       };
 
-      // --- INITIALIZE FIREBASE FROM SAVED CONFIG ---
+      // --- INITIALIZE FIREBASE ---
       useEffect(() => {
         const connectFirebase = () => {
           const rawConfig = localStorage.getItem('firebase_custom_config');
@@ -561,7 +599,7 @@
           };
           setTasks(prev => [newTask, ...prev]);
           syncTaskToStore(newTask);
-          showToast('New commitment added!', 'success');
+          showToast('Commitment added!', 'success');
         }
         setIsModalOpen(false);
         setEditingTask(null);
@@ -629,7 +667,7 @@
           };
           setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
           syncTaskToStore(updatedTask);
-          showToast('Payment logged & task completed!', 'success');
+          showToast('Payment logged & completed!', 'success');
         }
         setPayingTask(null);
       };
@@ -675,10 +713,11 @@
         return Array.from(set);
       }, [tasks]);
 
-      const currentMonthAnalytics = useMemo(() => {
+      const computeMonthExposure = (targetDate) => {
+        const curMonth = targetDate.getMonth();
+        const curYear = targetDate.getFullYear();
         const now = new Date();
-        const curMonth = now.getMonth();
-        const curYear = now.getFullYear();
+        const isPastMonth = curYear < now.getFullYear() || (curYear === now.getFullYear() && curMonth < now.getMonth());
 
         let totalMonthCOP = 0;
         const byPillar = { PROPERTIES: 0, BUSINESSES: 0, COMMITMENTS: 0, FAMILY: 0 };
@@ -687,7 +726,44 @@
         let itemsCount = 0;
 
         tasks.forEach(task => {
-          if (task.status === 'COMPLETED') return;
+          const prop = task.propertyName || task.location || 'General Asset';
+          const cat = task.subCategory || 'General';
+
+          // 1. Include actual logged payments made in that month
+          const historyInMonth = (task.paymentHistory || []).filter(p => {
+            if (!p.paidAt) return false;
+            const pd = new Date(p.paidAt);
+            return pd.getMonth() === curMonth && pd.getFullYear() === curYear;
+          });
+
+          if (historyInMonth.length > 0) {
+            historyInMonth.forEach(p => {
+              const amt = Number(p.amountCOP) || 0;
+              totalMonthCOP += amt;
+              itemsCount++;
+              if (byPillar[task.domain] !== undefined) byPillar[task.domain] += amt;
+              byProperty[prop] = (byProperty[prop] || 0) + amt;
+              byCategory[cat] = (byCategory[cat] || 0) + amt;
+            });
+            return;
+          }
+
+          // 2. Otherwise evaluate scheduled/projected rules for that month
+          if (task.status === 'COMPLETED') {
+            if (isPastMonth && task.dueDate) {
+              const due = new Date(task.dueDate);
+              if (due.getMonth() === curMonth && due.getFullYear() === curYear) {
+                const amt = Number(task.amountCOP) || 0;
+                totalMonthCOP += amt;
+                itemsCount++;
+                if (byPillar[task.domain] !== undefined) byPillar[task.domain] += amt;
+                byProperty[prop] = (byProperty[prop] || 0) + amt;
+                byCategory[cat] = (byCategory[cat] || 0) + amt;
+              }
+            }
+            return;
+          }
+
           const due = new Date(task.dueDate);
           const amount = Number(task.amountCOP) || 0;
           const recMonths = RECURRENCE_TYPES[task.recurrence]?.months || 0;
@@ -719,12 +795,13 @@
             totalMonthCOP += amount;
             itemsCount++;
             if (byPillar[task.domain] !== undefined) byPillar[task.domain] += amount;
-            const prop = task.propertyName || task.location || 'General Asset';
             byProperty[prop] = (byProperty[prop] || 0) + amount;
-            const cat = task.subCategory || 'General';
             byCategory[cat] = (byCategory[cat] || 0) + amount;
           }
         });
+
+        const topPropertyEntry = Object.entries(byProperty).sort((a, b) => b[1] - a[1])[0];
+        const topPillarEntry = Object.entries(byPillar).sort((a, b) => b[1] - a[1])[0];
 
         return {
           totalMonthCOP,
@@ -732,9 +809,20 @@
           byProperty,
           byCategory,
           itemsCount,
-          monthName: now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+          isPastMonth,
+          topProperty: topPropertyEntry ? { name: topPropertyEntry[0], amount: topPropertyEntry[1], pct: totalMonthCOP > 0 ? Math.round((topPropertyEntry[1] / totalMonthCOP) * 100) : 0 } : null,
+          topPillar: topPillarEntry && topPillarEntry[1] > 0 ? { label: DOMAINS[topPillarEntry[0]]?.label, amount: topPillarEntry[1], pct: totalMonthCOP > 0 ? Math.round((topPillarEntry[1] / totalMonthCOP) * 100) : 0 } : null,
+          monthName: targetDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })
         };
+      };
+
+      const currentMonthAnalytics = useMemo(() => {
+        return computeMonthExposure(new Date());
       }, [tasks, nowTick]);
+
+      const selectedExposureAnalytics = useMemo(() => {
+        return computeMonthExposure(exposureSelectedDate);
+      }, [tasks, exposureSelectedDate, nowTick]);
 
       const projectionDataDetailed = useMemo(() => {
         const monthBuckets = [];
@@ -742,7 +830,8 @@
 
         for (let i = 0; i < 12; i++) {
           const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
-          const monthLabel = futureDate.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+          const monthLabel = futureDate.toLocaleString('en-US', { month: 'short' });
+          const fullMonthLabel = futureDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
           const targetMonth = futureDate.getMonth();
           const targetYear = futureDate.getFullYear();
 
@@ -791,6 +880,7 @@
 
           monthBuckets.push({
             month: monthLabel,
+            fullMonthLabel,
             amountCOP: totalCOP,
             itemsCount,
             byPillar,
@@ -855,44 +945,76 @@
       }, [tasks, calendarCurrentDate]);
 
       const selectedDayAgendaTasks = calendarMonthData.dayTasksMap[selectedCalendarDay] || [];
+      const overdueCount = tasks.filter(t => t.status !== 'COMPLETED' && getColombiaTimeInfo(t.dueDate).isOverdue).length;
+      const activeTasksCount = tasks.filter(t => t.status !== 'COMPLETED').length;
+
+      // SVG Donut chart segments for Exposure Tab
+      const donutSegments = useMemo(() => {
+        const total = selectedExposureAnalytics.totalMonthCOP;
+        if (total <= 0) return [];
+        const radius = 56;
+        const circumference = 2 * Math.PI * radius;
+        let accumulatedPct = 0;
+
+        return Object.values(DOMAINS).map(dom => {
+          const val = selectedExposureAnalytics.byPillar[dom.id] || 0;
+          const pct = val / total;
+          const strokeDasharray = `${pct * circumference} ${circumference}`;
+          const strokeDashoffset = -accumulatedPct * circumference;
+          accumulatedPct += pct;
+          return {
+            ...dom,
+            val,
+            pct: Math.round(pct * 100),
+            strokeDasharray,
+            strokeDashoffset
+          };
+        }).filter(s => s.val > 0);
+      }, [selectedExposureAnalytics]);
 
       return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
+        <div className="min-h-screen bg-slate-950 text-slate-100 ios-main-safe">
           
-          {/* TOP NAVBAR */}
-          <header className="border-b border-slate-800 bg-slate-900/95 backdrop-blur-md sticky top-0 z-30">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-gradient-to-tr from-amber-500 via-emerald-500 to-blue-600 rounded-xl text-white shadow-lg">
-                  <Icon name="building-2" className="w-6 h-6" />
+          {/* NATIVE iOS SAFE-AREA TOP HEADER */}
+          <header className="border-b border-slate-800/80 bg-slate-900/90 backdrop-blur-xl sticky top-0 z-30 ios-header-safe">
+            <div className="max-w-5xl mx-auto px-4 pb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <div className="w-9 h-9 bg-gradient-to-tr from-amber-500 via-emerald-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0">
+                  <Icon name="building-2" className="w-5 h-5" />
                 </div>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h1 className="font-bold text-base sm:text-lg tracking-tight text-white">COLOMBIA COMMITMENTS</h1>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/30">
-                      COT UTC-5
+                <div className="min-w-0">
+                  <div className="flex items-center space-x-1.5">
+                    <h1 className="font-bold text-sm sm:text-base tracking-tight text-white truncate">COLOMBIA TASKS</h1>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30 shrink-0">
+                      COT
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-400">Properties, Businesses & Family Manager</p>
+                  <div className="flex items-center space-x-2 text-[11px] text-slate-400">
+                    <button
+                      onClick={() => setIsSettingsOpen(true)}
+                      className="flex items-center space-x-1 hover:text-white transition"
+                    >
+                      <span className={`w-2 h-2 rounded-full ${
+                        firebaseStatus === 'CONNECTED' ? 'bg-emerald-400' :
+                        firebaseStatus === 'ERROR' ? 'bg-rose-400' : 'bg-amber-400'
+                      }`} />
+                      <span className="font-medium">
+                        {firebaseStatus === 'CONNECTED' ? 'Cloud Synced' : firebaseStatus === 'ERROR' ? 'Sync Error' : 'Tap to Sync'}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center flex-wrap gap-2 justify-between md:justify-end">
-                <button
-                  onClick={() => setIsPresetsOpen(true)}
-                  className="flex items-center space-x-1 px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-xl text-xs font-semibold transition"
-                >
-                  <Icon name="zap" className="w-3.5 h-3.5" />
-                  <span>Presets</span>
-                </button>
-
-                <div className="flex items-center bg-slate-800 border border-slate-700/60 rounded-xl p-0.5 text-xs">
-                  {['USD', 'COP', 'EUR', 'QAR'].map(curr => (
+              {/* RIGHT CONTROLS: CURRENCY + PRESETS + ADD */}
+              <div className="flex items-center space-x-1.5 shrink-0">
+                <div className="flex items-center bg-slate-800/90 border border-slate-700/60 rounded-xl p-0.5 text-[11px]">
+                  {['USD', 'COP', 'QAR'].map(curr => (
                     <button
                       key={curr}
                       onClick={() => setActiveCurrency(curr)}
-                      className={`px-2 py-1 rounded-lg font-semibold transition ${
-                        activeCurrency === curr ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                      className={`px-2 py-1.5 rounded-lg font-bold transition min-h-[32px] ${
+                        activeCurrency === curr ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'
                       }`}
                     >
                       {curr}
@@ -901,22 +1023,16 @@
                 </div>
 
                 <button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition ${
-                    firebaseStatus === 'CONNECTED'
-                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400'
-                      : firebaseStatus === 'ERROR'
-                      ? 'bg-rose-950/50 border-rose-500/40 text-rose-400'
-                      : 'bg-amber-950/50 border-amber-500/40 text-amber-400'
-                  }`}
+                  onClick={() => setIsPresetsOpen(true)}
+                  aria-label="Presets"
+                  className="w-9 h-9 flex items-center justify-center bg-amber-500/15 border border-amber-500/30 text-amber-400 rounded-xl active:scale-95 transition"
                 >
-                  <Icon name="settings" className="w-3.5 h-3.5" />
-                  <span>{firebaseStatus === 'CONNECTED' ? 'Cloud Synced' : firebaseStatus === 'ERROR' ? 'Config Error' : 'Cloud Setup'}</span>
+                  <Icon name="zap" className="w-4 h-4" />
                 </button>
 
                 <button
                   onClick={() => { setEditingTask(null); setIsModalOpen(true); }}
-                  className="flex items-center space-x-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-bold rounded-xl text-xs shadow-md active:scale-95 transition"
+                  className="h-9 px-3 flex items-center space-x-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold rounded-xl text-xs shadow-md active:scale-95 transition"
                 >
                   <Icon name="plus" className="w-4 h-4" />
                   <span>Add</span>
@@ -927,11 +1043,11 @@
 
           {/* TOAST NOTIFICATION */}
           {toastMessage && (
-            <div className="fixed bottom-5 right-5 left-5 sm:left-auto z-50">
-              <div className={`flex items-center space-x-2 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold ${
-                toastMessage.type === 'success' ? 'bg-emerald-900 border-emerald-500 text-emerald-100' :
-                toastMessage.type === 'error' ? 'bg-rose-900 border-rose-500 text-rose-100' :
-                'bg-slate-800 border-slate-600 text-slate-100'
+            <div className="fixed top-20 left-4 right-4 sm:left-auto sm:right-6 z-50 pointer-events-none">
+              <div className={`flex items-center space-x-2 px-4 py-3 rounded-2xl shadow-2xl border text-xs font-semibold backdrop-blur-md ${
+                toastMessage.type === 'success' ? 'bg-emerald-950/95 border-emerald-500 text-emerald-100' :
+                toastMessage.type === 'error' ? 'bg-rose-950/95 border-rose-500 text-rose-100' :
+                'bg-slate-900/95 border-slate-700 text-slate-100'
               }`}>
                 <Icon name="sparkles" className="w-4 h-4 text-emerald-400" />
                 <span>{toastMessage.msg}</span>
@@ -939,128 +1055,109 @@
             </div>
           )}
 
-          {/* MAIN CONTENT */}
-          <main className="max-w-7xl mx-auto px-4 pt-5 space-y-5">
-
-            {/* NAVIGATION TABS */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
-                {[
-                  { id: 'dashboard', label: 'Dashboard', icon: 'layers' },
-                  { id: 'commitments', label: `Tasks (${tasks.filter(t => t.status !== 'COMPLETED').length})`, icon: 'clock' },
-                  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
-                  { id: 'projections', label: '12-Mo Forecast', icon: 'trending-up' },
-                  { id: 'analytics', label: 'Exposure', icon: 'pie-chart' }
-                ].map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                      activeTab === tab.id
-                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                    }`}
-                  >
-                    <Icon name={tab.icon} className="w-3.5 h-3.5" />
-                    <span>{tab.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="relative self-end sm:self-auto">
-                <button
-                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
-                >
-                  <Icon name="file-spreadsheet" className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Export CSV</span>
-                </button>
-                {isExportMenuOpen && (
-                  <div className="absolute right-0 top-10 z-40 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-1.5 space-y-1 w-48 text-xs">
-                    <button onClick={() => { exportCommitmentsToCSV(tasks, fxRates); setIsExportMenuOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200">
-                      Commitments CSV
-                    </button>
-                    <button onClick={() => { exportPaymentHistoryToCSV(tasks, fxRates); setIsExportMenuOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200">
-                      Payment History CSV
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+          {/* MAIN CONTENT CONTAINER */}
+          <main className="max-w-5xl mx-auto px-4 pt-4 space-y-4">
 
             {/* --- TAB 1: DASHBOARD --- */}
             {activeTab === 'dashboard' && (
-              <div className="space-y-5">
+              <div className="space-y-4">
+                {/* 2x2 EXECUTIVE KPI GRID */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-                    <div className="text-[10px] font-bold uppercase text-slate-400">This Month Outlay</div>
-                    <div className="text-lg sm:text-xl font-bold text-emerald-400 mt-1">
+                  <div
+                    onClick={() => setActiveTab('analytics')}
+                    className="bg-slate-900/90 border border-slate-800 active:border-emerald-500/50 p-4 rounded-2xl cursor-pointer transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">This Month</span>
+                      <Icon name="pie-chart" className="w-3.5 h-3.5 text-emerald-400" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-extrabold text-emerald-400 mt-1.5">
                       {formatCurrency(currentMonthAnalytics.totalMonthCOP, activeCurrency, fxRates)}
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">{currentMonthAnalytics.itemsCount} due this month</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{currentMonthAnalytics.itemsCount} due this cycle</div>
                   </div>
 
-                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-                    <div className="text-[10px] font-bold uppercase text-slate-400">Overdue Items</div>
-                    <div className="text-lg sm:text-xl font-bold text-rose-400 mt-1">
-                      {tasks.filter(t => t.status !== 'COMPLETED' && getColombiaTimeInfo(t.dueDate).isOverdue).length}
+                  <div
+                    onClick={() => { setSelectedStatus('ACTIVE'); setActiveTab('commitments'); }}
+                    className="bg-slate-900/90 border border-slate-800 active:border-rose-500/50 p-4 rounded-2xl cursor-pointer transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Overdue</span>
+                      <Icon name="alert-triangle" className="w-3.5 h-3.5 text-rose-400" />
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Immediate attention</div>
-                  </div>
-
-                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-                    <div className="text-[10px] font-bold uppercase text-slate-400">Active Rules</div>
-                    <div className="text-lg sm:text-xl font-bold text-blue-400 mt-1">
-                      {tasks.filter(t => t.status !== 'COMPLETED').length}
+                    <div className={`text-xl sm:text-2xl font-extrabold mt-1.5 ${overdueCount > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+                      {overdueCount}
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Tracked commitments</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{overdueCount > 0 ? 'Action needed' : 'All on track'}</div>
                   </div>
 
-                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-                    <div className="text-[10px] font-bold uppercase text-slate-400">Properties & Entities</div>
-                    <div className="text-lg sm:text-xl font-bold text-amber-400 mt-1">
+                  <div
+                    onClick={() => setActiveTab('projections')}
+                    className="bg-slate-900/90 border border-slate-800 active:border-blue-500/50 p-4 rounded-2xl cursor-pointer transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">12-Mo Run Rate</span>
+                      <Icon name="trending-up" className="w-3.5 h-3.5 text-blue-400" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-extrabold text-blue-400 mt-1.5">
+                      {formatCurrency(
+                        Math.round(projectionDataDetailed.reduce((a, b) => a + b.amountCOP, 0) / 12),
+                        activeCurrency,
+                        fxRates
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Avg monthly outlay</div>
+                  </div>
+
+                  <div
+                    onClick={() => setActiveTab('calendar')}
+                    className="bg-slate-900/90 border border-slate-800 active:border-amber-500/50 p-4 rounded-2xl cursor-pointer transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Assets</span>
+                      <Icon name="building-2" className="w-3.5 h-3.5 text-amber-400" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-extrabold text-amber-400 mt-1.5">
                       {propertyNamesList.length}
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Active locations</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{activeTasksCount} active rules</div>
                   </div>
                 </div>
 
-                {/* PILLAR CARDS */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* HORIZONTAL SWIPEABLE PILLAR CARDS */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   {Object.values(DOMAINS).map(dom => {
                     const domTasks = tasks.filter(t => t.domain === dom.id && t.status !== 'COMPLETED');
                     const domCOP = domTasks.reduce((acc, t) => acc + (Number(t.amountCOP) || 0), 0);
                     return (
-                      <div key={dom.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                      <button
+                        key={dom.id}
+                        onClick={() => { setSelectedDomain(dom.id); setActiveTab('commitments'); }}
+                        className="text-left bg-slate-900/90 border border-slate-800 active:scale-[0.98] rounded-2xl p-3.5 space-y-2 transition"
+                      >
                         <div className="flex items-center justify-between">
                           <span className={`flex items-center gap-1.5 text-xs font-bold ${dom.text}`}>
-                            <Icon name={dom.icon} className="w-4 h-4" />
-                            {dom.label}
+                            <Icon name={dom.icon} className="w-3.5 h-3.5" />
+                            <span>{dom.shortLabel}</span>
                           </span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-950 text-slate-400">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-950 text-slate-400 font-semibold">
                             {domTasks.length}
                           </span>
                         </div>
                         <div className="text-base font-bold text-white">
                           {formatCurrency(domCOP, activeCurrency, fxRates)}
                         </div>
-                        <button
-                          onClick={() => { setSelectedDomain(dom.id); setActiveTab('commitments'); }}
-                          className="w-full text-center text-xs font-semibold py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800"
-                        >
-                          Filter {dom.label} →
-                        </button>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
 
-                {/* UPCOMING LIST */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <h3 className="font-bold text-sm text-white">Next Upcoming Deadlines</h3>
-                    <button onClick={() => setActiveTab('commitments')} className="text-xs text-emerald-400 font-semibold">
-                      See All →
+                {/* NEXT UPCOMING DEADLINES */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <h3 className="font-bold text-sm text-white">Upcoming Deadlines</h3>
+                    <button onClick={() => { setSelectedDomain('ALL'); setActiveTab('commitments'); }} className="text-xs text-emerald-400 font-semibold py-1">
+                      See All ({activeTasksCount}) →
                     </button>
                   </div>
 
@@ -1068,48 +1165,48 @@
                     {tasks
                       .filter(t => t.status !== 'COMPLETED')
                       .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
-                      .slice(0, 5)
+                      .slice(0, 6)
                       .map(task => {
                         const domInfo = DOMAINS[task.domain] || DOMAINS.PROPERTIES;
                         const cotInfo = getColombiaTimeInfo(task.dueDate);
                         return (
-                          <div key={task.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div key={task.id} className="p-3.5 bg-slate-950/90 border border-slate-800/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div className="flex items-start space-x-3">
-                              <div className={`p-2 rounded-lg ${domInfo.bg} ${domInfo.text} border ${domInfo.border}`}>
+                              <div className={`p-2.5 rounded-xl ${domInfo.bg} ${domInfo.text} border ${domInfo.border} mt-0.5`}>
                                 <Icon name={domInfo.icon} className="w-4 h-4" />
                               </div>
-                              <div>
-                                <div className="font-bold text-xs sm:text-sm text-white">{task.title}</div>
-                                <div className="text-[11px] text-slate-400">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-sm text-white leading-snug">{task.title}</div>
+                                <div className="text-xs text-slate-400 mt-0.5 truncate">
                                   {task.propertyName || task.location} • {task.subCategory}
                                 </div>
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-between sm:justify-end space-x-3 border-t sm:border-t-0 border-slate-800/80 pt-2 sm:pt-0">
+                            <div className="flex items-center justify-between sm:justify-end space-x-3 border-t sm:border-t-0 border-slate-800/80 pt-2.5 sm:pt-0">
                               <div className="text-left sm:text-right">
-                                <div className="font-bold text-emerald-400 text-xs sm:text-sm">
+                                <div className="font-extrabold text-emerald-400 text-sm">
                                   {formatCurrency(task.amountCOP, activeCurrency, fxRates)}
                                 </div>
-                                <div className={`text-[10px] font-bold ${cotInfo.isOverdue ? 'text-rose-400' : 'text-amber-400'}`}>
+                                <div className={`text-[11px] font-bold ${cotInfo.isOverdue ? 'text-rose-400' : 'text-amber-400'}`}>
                                   {cotInfo.isOverdue ? `OVERDUE (${cotInfo.days}d)` : `Due in ${cotInfo.days}d ${cotInfo.hours}h`}
                                 </div>
                               </div>
 
-                              <div className="flex items-center space-x-1.5">
+                              <div className="flex items-center space-x-2">
                                 {task.paymentUrl && (
                                   <a
                                     href={task.paymentUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="px-2.5 py-1.5 bg-blue-500/20 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1"
+                                    className="min-h-[40px] px-3 bg-blue-500/20 text-blue-400 rounded-xl text-xs font-bold flex items-center gap-1 active:scale-95 transition"
                                   >
-                                    PSE <Icon name="arrow-up-right" className="w-3 h-3" />
+                                    PSE <Icon name="arrow-up-right" className="w-3.5 h-3.5" />
                                   </a>
                                 )}
                                 <button
                                   onClick={() => setPayingTask(task)}
-                                  className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs"
+                                  className="min-h-[40px] px-4 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs active:scale-95 transition shadow-sm"
                                 >
                                   Pay
                                 </button>
@@ -1125,100 +1222,141 @@
 
             {/* --- TAB 2: COMMITMENTS LIST --- */}
             {activeTab === 'commitments' && (
-              <div className="space-y-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row gap-2.5">
-                  <input
-                    type="text"
-                    placeholder="Search title, property, city..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                  />
-                  <div className="flex gap-2">
-                    <select
-                      value={selectedDomain}
-                      onChange={e => setSelectedDomain(e.target.value)}
-                      className="flex-1 sm:flex-none bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs"
+              <div className="space-y-3.5">
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2.5">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search commitment, property, city..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-3.5 pr-9 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400">
+                        <Icon name="x" className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Pill filter row */}
+                  <div className="flex items-center space-x-1.5 overflow-x-auto pb-0.5">
+                    <button
+                      onClick={() => setSelectedDomain('ALL')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                        selectedDomain === 'ALL' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-950 text-slate-400 border border-slate-800'
+                      }`}
                     >
-                      <option value="ALL">All Pillars</option>
-                      {Object.values(DOMAINS).map(d => (
-                        <option key={d.id} value={d.id}>{d.label}</option>
+                      All Pillars
+                    </button>
+                    {Object.values(DOMAINS).map(d => (
+                      <button
+                        key={d.id}
+                        onClick={() => setSelectedDomain(d.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                          selectedDomain === d.id ? 'bg-emerald-500 text-slate-950' : 'bg-slate-950 text-slate-400 border border-slate-800'
+                        }`}
+                      >
+                        {d.shortLabel}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex space-x-1.5">
+                      {['ACTIVE', 'COMPLETED', 'ALL'].map(st => (
+                        <button
+                          key={st}
+                          onClick={() => setSelectedStatus(st)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${
+                            selectedStatus === st ? 'bg-slate-800 text-white' : 'text-slate-500'
+                          }`}
+                        >
+                          {st === 'ACTIVE' ? 'Pending' : st === 'COMPLETED' ? 'Paid' : 'All'}
+                        </button>
                       ))}
-                    </select>
-                    <select
-                      value={selectedStatus}
-                      onChange={e => setSelectedStatus(e.target.value)}
-                      className="flex-1 sm:flex-none bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs"
+                    </div>
+
+                    <button
+                      onClick={() => exportCommitmentsToCSV(tasks, fxRates)}
+                      className="flex items-center space-x-1 text-[11px] font-semibold text-emerald-400 px-2 py-1 rounded-lg bg-emerald-500/10"
                     >
-                      <option value="ACTIVE">Pending</option>
-                      <option value="COMPLETED">Paid / Archived</option>
-                      <option value="ALL">All</option>
-                    </select>
+                      <Icon name="download" className="w-3.5 h-3.5" />
+                      <span>CSV</span>
+                    </button>
                   </div>
                 </div>
 
-                <div className="space-y-2.5">
-                  {filteredTasks.map(task => {
-                    const domInfo = DOMAINS[task.domain] || DOMAINS.PROPERTIES;
-                    const cotInfo = getColombiaTimeInfo(task.dueDate);
-                    const isPaid = task.status === 'COMPLETED';
-                    return (
-                      <div key={task.id} className={`p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 ${isPaid ? 'opacity-60' : ''}`}>
-                        <div className="flex items-start space-x-3">
-                          <div className={`p-2 rounded-xl ${domInfo.bg} ${domInfo.text} border ${domInfo.border}`}>
-                            <Icon name={domInfo.icon} className="w-4 h-4" />
+                <div className="space-y-3">
+                  {filteredTasks.length === 0 ? (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center text-slate-500 text-xs">
+                      No commitments match your current filter.
+                    </div>
+                  ) : (
+                    filteredTasks.map(task => {
+                      const domInfo = DOMAINS[task.domain] || DOMAINS.PROPERTIES;
+                      const cotInfo = getColombiaTimeInfo(task.dueDate);
+                      const isPaid = task.status === 'COMPLETED';
+                      return (
+                        <div key={task.id} className={`p-4 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-col gap-3 ${isPaid ? 'opacity-60' : ''}`}>
+                          <div className="flex items-start space-x-3">
+                            <div className={`p-2.5 rounded-xl ${domInfo.bg} ${domInfo.text} border ${domInfo.border} mt-0.5`}>
+                              <Icon name={domInfo.icon} className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center flex-wrap gap-1.5">
+                                <h4 className="font-bold text-sm text-white">{task.title}</h4>
+                                {task.recurrence && task.recurrence !== 'NONE' && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
+                                    {task.recurrence} • Day {task.dueDayOfMonth}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-400 mt-1">
+                                <span className="text-slate-200 font-semibold">{task.propertyName || task.location}</span> • {task.subCategory}
+                              </div>
+                              {task.notes && <div className="text-[11px] text-slate-500 mt-1">{task.notes}</div>}
+                            </div>
                           </div>
-                          <div>
-                            <div className="flex items-center flex-wrap gap-1.5">
-                              <h4 className="font-bold text-sm text-white">{task.title}</h4>
-                              {task.recurrence && task.recurrence !== 'NONE' && (
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                  {task.recurrence} (Day {task.dueDayOfMonth})
-                                </span>
+
+                          <div className="flex items-center justify-between border-t border-slate-800/80 pt-3">
+                            <div>
+                              <div className="font-extrabold text-base text-emerald-400">
+                                {formatCurrency(task.amountCOP, activeCurrency, fxRates)}
+                              </div>
+                              <div className={`text-[11px] font-semibold ${cotInfo.isOverdue && !isPaid ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {cotInfo.formattedCOT}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-1.5">
+                              {task.paymentUrl && (
+                                <a href={task.paymentUrl} target="_blank" rel="noopener noreferrer" className="min-h-[40px] px-3 bg-blue-500/20 text-blue-400 rounded-xl text-xs font-bold flex items-center">
+                                  PSE
+                                </a>
                               )}
+                              {!isPaid && (
+                                <button onClick={() => setPayingTask(task)} className="min-h-[40px] px-3.5 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs active:scale-95 transition">
+                                  Pay
+                                </button>
+                              )}
+                              {(task.paymentHistory || []).length > 0 && (
+                                <button onClick={() => setHistoryModalTask(task)} className="w-10 h-10 flex items-center justify-center bg-slate-950 text-slate-300 rounded-xl border border-slate-800">
+                                  <Icon name="history" className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button onClick={() => { setEditingTask(task); setIsModalOpen(true); }} className="w-10 h-10 flex items-center justify-center bg-slate-950 text-slate-300 rounded-xl border border-slate-800">
+                                <Icon name="edit-3" className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => deleteTaskFromStore(task.id)} className="w-10 h-10 flex items-center justify-center bg-slate-950 text-rose-400 rounded-xl border border-slate-800">
+                                <Icon name="trash-2" className="w-4 h-4" />
+                              </button>
                             </div>
-                            <div className="text-xs text-slate-400 mt-0.5">
-                              <span className="text-slate-200 font-semibold">{task.propertyName || task.location}</span> • {task.subCategory}
-                            </div>
-                            {task.notes && <div className="text-[11px] text-slate-500 mt-1">{task.notes}</div>}
                           </div>
                         </div>
-
-                        <div className="flex items-center justify-between md:justify-end space-x-3 border-t md:border-t-0 border-slate-800 pt-2.5 md:pt-0">
-                          <div className="text-left md:text-right">
-                            <div className="font-bold text-base text-emerald-400">
-                              {formatCurrency(task.amountCOP, activeCurrency, fxRates)}
-                            </div>
-                            <div className="text-[10px] text-slate-400">{cotInfo.formattedCOT}</div>
-                          </div>
-
-                          <div className="flex items-center space-x-1.5">
-                            {task.paymentUrl && (
-                              <a href={task.paymentUrl} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1.5 bg-blue-500/20 text-blue-400 rounded-xl text-xs font-bold">
-                                PSE
-                              </a>
-                            )}
-                            {!isPaid && (
-                              <button onClick={() => setPayingTask(task)} className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs">
-                                Mark Paid
-                              </button>
-                            )}
-                            {(task.paymentHistory || []).length > 0 && (
-                              <button onClick={() => setHistoryModalTask(task)} className="p-1.5 bg-slate-950 text-slate-400 rounded-xl border border-slate-800">
-                                <Icon name="history" className="w-4 h-4" />
-                              </button>
-                            )}
-                            <button onClick={() => { setEditingTask(task); setIsModalOpen(true); }} className="p-1.5 bg-slate-950 text-slate-400 rounded-xl border border-slate-800">
-                              <Icon name="edit-3" className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => deleteTaskFromStore(task.id)} className="p-1.5 bg-slate-950 text-rose-400 rounded-xl border border-slate-800">
-                              <Icon name="trash-2" className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -1226,10 +1364,10 @@
             {/* --- TAB 3: CALENDAR VIEW --- */}
             {activeTab === 'calendar' && (
               <div className="space-y-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
                   <div>
                     <h2 className="font-bold text-base text-white">{calendarMonthData.monthName}</h2>
-                    <p className="text-[11px] text-slate-400">Tap any day to view due commitments</p>
+                    <p className="text-[11px] text-slate-400">Tap any day to view due items</p>
                   </div>
                   <div className="flex items-center space-x-1.5">
                     <button
@@ -1237,7 +1375,7 @@
                         setCalendarCurrentDate(new Date(calendarCurrentDate.getFullYear(), calendarCurrentDate.getMonth() - 1, 1));
                         setSelectedCalendarDay(1);
                       }}
-                      className="p-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300"
+                      className="w-10 h-10 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-xl text-slate-300 active:scale-95"
                     >
                       <Icon name="chevron-left" className="w-4 h-4" />
                     </button>
@@ -1247,7 +1385,7 @@
                         setCalendarCurrentDate(now);
                         setSelectedCalendarDay(now.getDate());
                       }}
-                      className="px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold rounded-xl"
+                      className="h-10 px-3 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-xl active:scale-95"
                     >
                       Today
                     </button>
@@ -1256,7 +1394,7 @@
                         setCalendarCurrentDate(new Date(calendarCurrentDate.getFullYear(), calendarCurrentDate.getMonth() + 1, 1));
                         setSelectedCalendarDay(1);
                       }}
-                      className="p-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300"
+                      className="w-10 h-10 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-xl text-slate-300 active:scale-95"
                     >
                       <Icon name="chevron-right" className="w-4 h-4" />
                     </button>
@@ -1264,69 +1402,111 @@
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4">
+                  <div className="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-3">
                     <div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] text-slate-400 mb-2 uppercase">
                       <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
                     </div>
                     <div className="grid grid-cols-7 gap-1">
                       {Array.from({ length: calendarMonthData.firstDayIndex }).map((_, i) => (
-                        <div key={`empty-${i}`} className="min-h-[60px] bg-slate-950/30 rounded-xl opacity-20" />
+                        <div key={`empty-${i}`} className="min-h-[54px] bg-slate-950/30 rounded-xl opacity-20" />
                       ))}
                       {Array.from({ length: calendarMonthData.totalDaysInMonth }).map((_, i) => {
                         const dayNum = i + 1;
                         const dayTasks = calendarMonthData.dayTasksMap[dayNum] || [];
                         const isSelected = selectedCalendarDay === dayNum;
+                        const isToday =
+                          new Date().getDate() === dayNum &&
+                          new Date().getMonth() === calendarMonthData.month &&
+                          new Date().getFullYear() === calendarMonthData.year;
+
                         return (
-                          <div
+                          <button
                             key={dayNum}
                             onClick={() => setSelectedCalendarDay(dayNum)}
-                            className={`min-h-[60px] sm:min-h-[75px] p-1.5 rounded-xl border cursor-pointer flex flex-col justify-between ${
-                              isSelected ? 'bg-emerald-950/40 border-emerald-500' : 'bg-slate-950/70 border-slate-800'
+                            className={`min-h-[54px] sm:min-h-[70px] p-1.5 rounded-xl border flex flex-col justify-between text-left transition ${
+                              isSelected
+                                ? 'bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500/40'
+                                : isToday
+                                ? 'bg-blue-950/40 border-blue-500/50'
+                                : 'bg-slate-950/70 border-slate-800/90'
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className={`text-xs font-bold ${isSelected ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
+                            <div className="flex items-center justify-between w-full">
+                              <span className={`text-xs font-bold ${
+                                isSelected ? 'text-emerald-400' : isToday ? 'text-blue-400' : 'text-slate-300'
+                              }`}>
+                                {dayNum}
+                              </span>
                               {dayTasks.length > 0 && (
-                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <span className="text-[9px] font-bold px-1.5 rounded-full bg-emerald-500/20 text-emerald-400">
+                                  {dayTasks.length}
+                                </span>
                               )}
                             </div>
-                            <div className="space-y-0.5 overflow-hidden">
-                              {dayTasks.slice(0, 2).map((t, idx) => (
-                                <div key={idx} className="text-[9px] truncate px-1 rounded bg-slate-800 text-slate-200">
-                                  {t.title}
-                                </div>
-                              ))}
+
+                            {/* Color-coded pillar dots for crisp mobile readability */}
+                            <div className="flex items-center gap-1 flex-wrap mt-1">
+                              {dayTasks.slice(0, 4).map((t, idx) => {
+                                const domInfo = DOMAINS[t.domain] || DOMAINS.PROPERTIES;
+                                return (
+                                  <span
+                                    key={idx}
+                                    className="w-2 h-2 rounded-full"
+                                    style={{ backgroundColor: domInfo.color }}
+                                  />
+                                );
+                              })}
                             </div>
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
                   </div>
 
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  {/* DAILY AGENDA PANEL */}
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
                     <div className="border-b border-slate-800 pb-2.5 flex justify-between items-center">
-                      <h3 className="font-bold text-sm text-white">
-                        {calendarCurrentDate.toLocaleString('en-US', { month: 'short' })} {selectedCalendarDay} Agenda
-                      </h3>
-                      <span className="text-xs font-bold text-emerald-400">{selectedDayAgendaTasks.length} Due</span>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Selected Date</div>
+                        <h3 className="font-bold text-sm text-white">
+                          {calendarCurrentDate.toLocaleString('en-US', { month: 'long' })} {selectedCalendarDay}
+                        </h3>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full bg-slate-950 border border-slate-800 text-xs font-bold text-emerald-400">
+                        {selectedDayAgendaTasks.length} Due
+                      </span>
                     </div>
 
                     {selectedDayAgendaTasks.length === 0 ? (
                       <p className="text-xs text-slate-500 py-8 text-center">No commitments due on this date.</p>
                     ) : (
                       <div className="space-y-2.5">
-                        {selectedDayAgendaTasks.map(task => (
-                          <div key={task.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                            <div className="font-bold text-xs text-white">{task.title}</div>
-                            <div className="text-[11px] text-slate-400">{task.propertyName || task.location}</div>
-                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-800">
-                              <span className="font-bold text-xs text-emerald-400">{formatCurrency(task.amountCOP, activeCurrency, fxRates)}</span>
-                              <button onClick={() => setPayingTask(task)} className="px-2.5 py-1 bg-emerald-500 text-slate-950 font-bold rounded-lg text-[10px]">
-                                Pay
-                              </button>
+                        {selectedDayAgendaTasks.map(task => {
+                          const domInfo = DOMAINS[task.domain] || DOMAINS.PROPERTIES;
+                          return (
+                            <div key={task.id} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${domInfo.bg} ${domInfo.text}`}>
+                                  {domInfo.shortLabel}
+                                </span>
+                                <span className="text-[10px] text-slate-400">{task.recurrence}</span>
+                              </div>
+                              <div className="font-bold text-xs text-white">{task.title}</div>
+                              <div className="text-[11px] text-slate-400">{task.propertyName || task.location}</div>
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                                <span className="font-extrabold text-sm text-emerald-400">
+                                  {formatCurrency(task.amountCOP, activeCurrency, fxRates)}
+                                </span>
+                                <button
+                                  onClick={() => setPayingTask(task)}
+                                  className="min-h-[36px] px-3.5 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs active:scale-95"
+                                >
+                                  Pay
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1334,126 +1514,414 @@
               </div>
             )}
 
-            {/* --- TAB 4: 12-MONTH PROJECTIONS --- */}
+            {/* --- TAB 4: 12-MONTH FORECAST (INTERACTIVE STACKED CHART) --- */}
             {activeTab === 'projections' && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h2 className="font-bold text-base text-white">12-Month Outlay Forecast</h2>
-                    <p className="text-xs text-slate-400">Projected cash flow requirements across upcoming cycles</p>
+              <div className="space-y-4">
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h2 className="font-bold text-base text-white">12-Month Outlay Forecast</h2>
+                      <p className="text-xs text-slate-400">Tap any month bar below to inspect its exact breakdown</p>
+                    </div>
+                    <div className="flex space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs self-start">
+                      {['PILLAR', 'PROPERTY'].map(mode => (
+                        <button
+                          key={mode}
+                          onClick={() => setProjectionsGroupMode(mode)}
+                          className={`px-3.5 py-1.5 rounded-lg font-bold transition ${
+                            projectionsGroupMode === mode ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'
+                          }`}
+                        >
+                          By {mode === 'PILLAR' ? 'Pillar' : 'Property'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs self-start">
-                    {['PILLAR', 'PROPERTY'].map(mode => (
-                      <button
-                        key={mode}
-                        onClick={() => setProjectionsGroupMode(mode)}
-                        className={`px-3 py-1 rounded-lg font-bold ${projectionsGroupMode === mode ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}`}
-                      >
-                        {mode}
-                      </button>
-                    ))}
-                  </div>
-                </div>
 
-                <div className="space-y-3 pt-2">
-                  {projectionDataDetailed.map((row, idx) => {
+                  {/* INTERACTIVE VERTICAL STACKED BAR CHART */}
+                  {(() => {
                     const maxMonthCOP = Math.max(...projectionDataDetailed.map(r => r.amountCOP), 1);
-                    const totalPct = Math.round((row.amountCOP / maxMonthCOP) * 100);
+                    const selectedMonth = projectionDataDetailed[selectedForecastMonthIdx] || projectionDataDetailed[0];
+
                     return (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="font-bold text-white">{row.month} <span className="text-slate-500 font-normal">({row.itemsCount} items)</span></span>
-                          <span className="font-bold text-emerald-400">{formatCurrency(row.amountCOP, activeCurrency, fxRates)}</span>
+                      <div className="space-y-4">
+                        <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 sm:p-4">
+                          <div className="grid grid-cols-12 gap-1.5 sm:gap-2.5 items-end h-48 pt-6">
+                            {projectionDataDetailed.map((row, idx) => {
+                              const isSelected = selectedForecastMonthIdx === idx;
+                              const heightPct = Math.max(Math.round((row.amountCOP / maxMonthCOP) * 100), row.amountCOP > 0 ? 8 : 2);
+
+                              return (
+                                <button
+                                  key={idx}
+                                  onClick={() => setSelectedForecastMonthIdx(idx)}
+                                  className="flex flex-col items-center h-full justify-end group focus:outline-none"
+                                >
+                                  <span className={`text-[9px] font-bold mb-1 transition ${
+                                    isSelected ? 'text-emerald-400 scale-110' : 'text-slate-500'
+                                  }`}>
+                                    {row.amountCOP > 0 ? formatCompactCurrency(row.amountCOP, activeCurrency, fxRates) : '0'}
+                                  </span>
+
+                                  <div
+                                    style={{ height: `${heightPct}%` }}
+                                    className={`w-full max-w-[26px] rounded-t-lg overflow-hidden flex flex-col-reverse transition-all ${
+                                      isSelected ? 'ring-2 ring-white shadow-lg shadow-emerald-500/20' : 'opacity-85 group-hover:opacity-100'
+                                    }`}
+                                  >
+                                    {projectionsGroupMode === 'PILLAR' ? (
+                                      <>
+                                        {row.byPillar.PROPERTIES > 0 && (
+                                          <div style={{ height: `${(row.byPillar.PROPERTIES / row.amountCOP) * 100}%`, backgroundColor: DOMAINS.PROPERTIES.color }} />
+                                        )}
+                                        {row.byPillar.BUSINESSES > 0 && (
+                                          <div style={{ height: `${(row.byPillar.BUSINESSES / row.amountCOP) * 100}%`, backgroundColor: DOMAINS.BUSINESSES.color }} />
+                                        )}
+                                        {row.byPillar.COMMITMENTS > 0 && (
+                                          <div style={{ height: `${(row.byPillar.COMMITMENTS / row.amountCOP) * 100}%`, backgroundColor: DOMAINS.COMMITMENTS.color }} />
+                                        )}
+                                        {row.byPillar.FAMILY > 0 && (
+                                          <div style={{ height: `${(row.byPillar.FAMILY / row.amountCOP) * 100}%`, backgroundColor: DOMAINS.FAMILY.color }} />
+                                        )}
+                                      </>
+                                    ) : (
+                                      propertyNamesList.map((propName, pIdx) => {
+                                        const val = row.byProperty[propName] || 0;
+                                        if (val <= 0) return null;
+                                        return (
+                                          <div
+                                            key={propName}
+                                            style={{
+                                              height: `${(val / row.amountCOP) * 100}%`,
+                                              backgroundColor: PROPERTY_PALETTE[pIdx % PROPERTY_PALETTE.length]
+                                            }}
+                                          />
+                                        );
+                                      })
+                                    )}
+                                  </div>
+
+                                  <span className={`text-[10px] font-bold mt-1.5 ${
+                                    isSelected ? 'text-white' : 'text-slate-400'
+                                  }`}>
+                                    {row.month}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* DYNAMIC COLOR LEGEND */}
+                          <div className="flex flex-wrap gap-3 pt-3 mt-3 border-t border-slate-800/80 text-[11px] text-slate-300">
+                            {projectionsGroupMode === 'PILLAR' ? (
+                              Object.values(DOMAINS).map(dom => (
+                                <span key={dom.id} className="flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dom.color }} />
+                                  {dom.shortLabel}
+                                </span>
+                              ))
+                            ) : (
+                              propertyNamesList.map((propName, pIdx) => (
+                                <span key={propName} className="flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PROPERTY_PALETTE[pIdx % PROPERTY_PALETTE.length] }} />
+                                  <span className="truncate max-w-[140px]">{propName}</span>
+                                </span>
+                              ))
+                            )}
+                          </div>
                         </div>
-                        <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
-                          {projectionsGroupMode === 'PILLAR' ? (
-                            <>
-                              <div style={{ width: `${(row.byPillar.PROPERTIES / maxMonthCOP) * 100}%` }} className="bg-emerald-500 h-full" title="Properties" />
-                              <div style={{ width: `${(row.byPillar.BUSINESSES / maxMonthCOP) * 100}%` }} className="bg-blue-500 h-full" title="Businesses" />
-                              <div style={{ width: `${(row.byPillar.COMMITMENTS / maxMonthCOP) * 100}%` }} className="bg-amber-500 h-full" title="Legal/Financial" />
-                              <div style={{ width: `${(row.byPillar.FAMILY / maxMonthCOP) * 100}%` }} className="bg-pink-500 h-full" title="Family" />
-                            </>
-                          ) : (
-                            <div style={{ width: `${totalPct}%` }} className="bg-gradient-to-r from-emerald-500 to-blue-500 h-full" />
-                          )}
-                        </div>
+
+                        {/* SELECTED MONTH DRILL-DOWN CARD */}
+                        {selectedMonth && (
+                          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                              <div>
+                                <div className="text-[10px] uppercase font-bold text-emerald-400">Selected Month Breakdown</div>
+                                <h3 className="font-bold text-sm text-white">{selectedMonth.fullMonthLabel}</h3>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-base font-extrabold text-emerald-400">
+                                  {formatCurrency(selectedMonth.amountCOP, activeCurrency, fxRates)}
+                                </div>
+                                <div className="text-[10px] text-slate-400">{selectedMonth.itemsCount} items scheduled</div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              {projectionsGroupMode === 'PILLAR' ? (
+                                Object.values(DOMAINS).map(dom => {
+                                  const amt = selectedMonth.byPillar[dom.id] || 0;
+                                  if (amt <= 0) return null;
+                                  const pct = selectedMonth.amountCOP > 0 ? Math.round((amt / selectedMonth.amountCOP) * 100) : 0;
+                                  return (
+                                    <div key={dom.id} className="flex items-center justify-between text-xs py-1">
+                                      <span className="flex items-center gap-2 text-slate-200 font-medium">
+                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dom.color }} />
+                                        {dom.label}
+                                      </span>
+                                      <span className="font-bold text-white">
+                                        {formatCurrency(amt, activeCurrency, fxRates)} <span className="text-slate-500">({pct}%)</span>
+                                      </span>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                Object.entries(selectedMonth.byProperty)
+                                  .sort((a, b) => b[1] - a[1])
+                                  .map(([propName, amt], pIdx) => {
+                                    if (amt <= 0) return null;
+                                    const pct = selectedMonth.amountCOP > 0 ? Math.round((amt / selectedMonth.amountCOP) * 100) : 0;
+                                    return (
+                                      <div key={propName} className="flex items-center justify-between text-xs py-1">
+                                        <span className="flex items-center gap-2 text-slate-200 font-medium truncate max-w-[200px]">
+                                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PROPERTY_PALETTE[pIdx % PROPERTY_PALETTE.length] }} />
+                                          <span className="truncate">{propName}</span>
+                                        </span>
+                                        <span className="font-bold text-white shrink-0">
+                                          {formatCurrency(amt, activeCurrency, fxRates)} <span className="text-slate-500">({pct}%)</span>
+                                        </span>
+                                      </div>
+                                    );
+                                  })
+                              )}
+                              {selectedMonth.amountCOP === 0 && (
+                                <p className="text-xs text-slate-500 py-2">No commitments scheduled for this month.</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
-
-                {projectionsGroupMode === 'PILLAR' && (
-                  <div className="flex flex-wrap gap-3 pt-2 text-[11px] text-slate-400 border-t border-slate-800">
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Properties</span>
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Businesses</span>
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Legal/Financial</span>
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-pink-500" /> Family</span>
-                  </div>
-                )}
               </div>
             )}
 
-            {/* --- TAB 5: CURRENT MONTH EXPOSURE --- */}
+            {/* --- TAB 5: MONTHLY EXPOSURE ANALYTICS --- */}
             {activeTab === 'analytics' && (
               <div className="space-y-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                      {currentMonthAnalytics.monthName}
-                    </span>
-                    <h2 className="text-lg font-bold text-white mt-1">Current Month Financial Exposure</h2>
-                  </div>
-                  <div className="text-left sm:text-right">
-                    <div className="text-[10px] text-slate-400 uppercase">Total Active Cycle</div>
-                    <div className="text-2xl font-bold text-emerald-400">
-                      {formatCurrency(currentMonthAnalytics.totalMonthCOP, activeCurrency, fxRates)}
+                {/* HEADER WITH MONTH SELECTOR & KEY INSIGHT CALLOUT */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                          {selectedExposureAnalytics.isPastMonth ? 'Historical Cycle' : 'Active / Projected'}
+                        </span>
+                      </div>
+                      <h2 className="text-lg font-bold text-white mt-1.5">{selectedExposureAnalytics.monthName}</h2>
+                    </div>
+
+                    {/* MONTH NAVIGATION CONTROLS */}
+                    <div className="flex items-center space-x-1.5 self-start sm:self-auto">
+                      <button
+                        onClick={() => setExposureSelectedDate(new Date(exposureSelectedDate.getFullYear(), exposureSelectedDate.getMonth() - 1, 1))}
+                        aria-label="Previous Month"
+                        className="w-10 h-10 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-xl text-slate-300 active:scale-95 transition"
+                      >
+                        <Icon name="chevron-left" className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const now = new Date();
+                          setExposureSelectedDate(new Date(now.getFullYear(), now.getMonth(), 1));
+                        }}
+                        className="h-10 px-3 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-xl active:scale-95 transition"
+                      >
+                        Current
+                      </button>
+
+                      <button
+                        onClick={() => setExposureSelectedDate(new Date(exposureSelectedDate.getFullYear(), exposureSelectedDate.getMonth() + 1, 1))}
+                        aria-label="Next Month"
+                        className="w-10 h-10 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-xl text-slate-300 active:scale-95 transition"
+                      >
+                        <Icon name="chevron-right" className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-                    <h3 className="font-bold text-sm text-white">By Pillar Domain</h3>
-                    {Object.values(DOMAINS).map(dom => {
-                      const amt = currentMonthAnalytics.byPillar[dom.id] || 0;
-                      const pct = currentMonthAnalytics.totalMonthCOP > 0 ? Math.round((amt / currentMonthAnalytics.totalMonthCOP) * 100) : 0;
-                      return (
-                        <div key={dom.id} className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className={`font-semibold ${dom.text}`}>{dom.label}</span>
-                            <span className="font-bold text-white">{formatCurrency(amt, activeCurrency, fxRates)} ({pct}%)</span>
-                          </div>
-                          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: dom.color }} />
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="flex items-baseline justify-between border-t border-slate-800/80 pt-3">
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase font-bold">Total Cycle Outlay</div>
+                      <div className="text-2xl font-extrabold text-emerald-400 mt-0.5">
+                        {formatCurrency(selectedExposureAnalytics.totalMonthCOP, activeCurrency, fxRates)}
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-slate-400">
+                      <span className="font-bold text-white">{selectedExposureAnalytics.itemsCount}</span> items
+                    </div>
                   </div>
 
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-                    <h3 className="font-bold text-sm text-white">By Property / Asset</h3>
-                    {Object.entries(currentMonthAnalytics.byProperty).map(([propName, amt]) => {
-                      const pct = currentMonthAnalytics.totalMonthCOP > 0 ? Math.round((amt / currentMonthAnalytics.totalMonthCOP) * 100) : 0;
-                      return (
-                        <div key={propName} className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="font-semibold text-slate-200 truncate max-w-[180px]">{propName}</span>
-                            <span className="font-bold text-emerald-400">{formatCurrency(amt, activeCurrency, fxRates)} ({pct}%)</span>
-                          </div>
-                          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
-                          </div>
+                  {selectedExposureAnalytics.topProperty && (
+                    <div className="p-3 bg-emerald-950/30 border border-emerald-500/30 rounded-xl flex items-start space-x-2.5 text-xs text-emerald-200">
+                      <Icon name="sparkles" className="w-4 h-4 text-emerald-400 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-white">{selectedExposureAnalytics.topProperty.name}</span> represents{' '}
+                        <span className="font-bold text-emerald-400">{selectedExposureAnalytics.topProperty.pct}%</span> (
+                        {formatCurrency(selectedExposureAnalytics.topProperty.amount, activeCurrency, fxRates)}) of total outlay in {selectedExposureAnalytics.monthName}.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* VISUAL DONUT + PILLAR DISTRIBUTION */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                    <h3 className="font-bold text-sm text-white">Distribution by Pillar Domain</h3>
+
+                    {/* SVG DONUT RING */}
+                    <div className="flex items-center justify-around gap-4 py-1">
+                      <div className="relative w-36 h-36 shrink-0">
+                        <svg viewBox="0 0 140 140" className="w-full h-full -rotate-90">
+                          <circle cx="70" cy="70" r="56" fill="transparent" stroke="#0f172a" strokeWidth="18" />
+                          {donutSegments.map(seg => (
+                            <circle
+                              key={seg.id}
+                              cx="70"
+                              cy="70"
+                              r="56"
+                              fill="transparent"
+                              stroke={seg.color}
+                              strokeWidth="18"
+                              strokeDasharray={seg.strokeDasharray}
+                              strokeDashoffset={seg.strokeDashoffset}
+                            />
+                          ))}
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                          <span className="text-[9px] uppercase font-bold text-slate-400">Total</span>
+                          <span className="text-xs font-extrabold text-white">
+                            {formatCompactCurrency(selectedExposureAnalytics.totalMonthCOP, activeCurrency, fxRates)}
+                          </span>
                         </div>
-                      );
-                    })}
+                      </div>
+
+                      <div className="space-y-2 flex-1">
+                        {Object.values(DOMAINS).map(dom => {
+                          const amt = selectedExposureAnalytics.byPillar[dom.id] || 0;
+                          const pct = selectedExposureAnalytics.totalMonthCOP > 0 ? Math.round((amt / selectedExposureAnalytics.totalMonthCOP) * 100) : 0;
+                          return (
+                            <div key={dom.id} className="flex items-center justify-between text-xs">
+                              <span className="flex items-center gap-1.5 text-slate-300 font-medium">
+                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dom.color }} />
+                                {dom.shortLabel}
+                              </span>
+                              <span className="font-bold text-white">{pct}%</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                      {Object.values(DOMAINS).map(dom => {
+                        const amt = selectedExposureAnalytics.byPillar[dom.id] || 0;
+                        const pct = selectedExposureAnalytics.totalMonthCOP > 0 ? Math.round((amt / selectedExposureAnalytics.totalMonthCOP) * 100) : 0;
+                        return (
+                          <div key={dom.id} className="space-y-1">
+                            <div className="flex justify-between text-xs">
+                              <span className={`font-semibold ${dom.text}`}>{dom.label}</span>
+                              <span className="font-bold text-white">{formatCurrency(amt, activeCurrency, fxRates)} ({pct}%)</span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: dom.color }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* PROPERTY & ENTITY EXPOSURE */}
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                    <h3 className="font-bold text-sm text-white">Exposure by Property & Entity</h3>
+                    {Object.keys(selectedExposureAnalytics.byProperty).length === 0 ? (
+                      <p className="text-xs text-slate-500 py-6 text-center">No outlays recorded for {selectedExposureAnalytics.monthName}.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {Object.entries(selectedExposureAnalytics.byProperty)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([propName, amt], idx) => {
+                            const pct = selectedExposureAnalytics.totalMonthCOP > 0 ? Math.round((amt / selectedExposureAnalytics.totalMonthCOP) * 100) : 0;
+                            const barColor = PROPERTY_PALETTE[idx % PROPERTY_PALETTE.length];
+                            return (
+                              <div key={propName} className="space-y-1">
+                                <div className="flex justify-between text-xs">
+                                  <span className="font-semibold text-slate-200 truncate max-w-[180px]">{propName}</span>
+                                  <span className="font-bold text-emerald-400">{formatCurrency(amt, activeCurrency, fxRates)} ({pct}%)</span>
+                                </div>
+                                <div className="h-2.5 w-full bg-slate-950 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: barColor }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+
+                    {/* CATEGORY PILLS */}
+                    <div className="pt-3 border-t border-slate-800 space-y-2">
+                      <div className="text-[11px] font-bold uppercase text-slate-400">By Expense Category</div>
+                      {Object.keys(selectedExposureAnalytics.byCategory).length === 0 ? (
+                        <p className="text-xs text-slate-500">No categories for this period.</p>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          {Object.entries(selectedExposureAnalytics.byCategory)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([catName, amt]) => (
+                              <div key={catName} className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+                                <div className="text-[11px] text-slate-400 truncate">{catName}</div>
+                                <div className="text-xs font-bold text-white mt-0.5">
+                                  {formatCurrency(amt, activeCurrency, fxRates)}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             )}
           </main>
 
-          {/* --- MODALS --- */}
+          {/* NATIVE iOS BOTTOM THUMB-ZONE TAB BAR */}
+          <nav className="fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/90 ios-bottom-bar-safe">
+            <div className="max-w-lg mx-auto px-2 pt-1.5 grid grid-cols-5 gap-1">
+              {[
+                { id: 'dashboard', label: 'Home', icon: 'layout-grid' },
+                { id: 'commitments', label: 'Tasks', icon: 'check-circle-2', badge: activeTasksCount },
+                { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+                { id: 'projections', label: 'Forecast', icon: 'trending-up' },
+                { id: 'analytics', label: 'Exposure', icon: 'pie-chart' }
+              ].map(tab => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`relative flex flex-col items-center justify-center py-1.5 rounded-xl transition active:scale-95 ${
+                      isActive ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`p-1 rounded-xl ${isActive ? 'bg-emerald-500/15' : ''}`}>
+                      <Icon name={tab.icon} className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-bold mt-0.5 tracking-tight">{tab.label}</span>
+                    {tab.badge > 0 && (
+                      <span className="absolute top-1 right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-extrabold flex items-center justify-center">
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+
+          {/* --- BOTTOM-SHEET MODALS --- */}
           {isModalOpen && (
             <TaskFormModal task={editingTask} onClose={() => setIsModalOpen(false)} onSave={handleSaveTask} />
           )}
@@ -1474,6 +1942,8 @@
             <SettingsModal
               config={localStorage.getItem('firebase_custom_config') || ''}
               status={firebaseStatus}
+              tasks={tasks}
+              fxRates={fxRates}
               onClose={() => setIsSettingsOpen(false)}
               onSaveConfig={(rawInput) => {
                 if (!rawInput || rawInput.trim() === '') {
@@ -1497,7 +1967,7 @@
       );
     }
 
-    // --- MODAL COMPONENTS ---
+    // --- BOTTOM-SHEET MODAL COMPONENTS ---
     function TaskFormModal({ task, onClose, onSave }) {
       const [formData, setFormData] = useState({
         title: task?.title || '',
@@ -1539,69 +2009,72 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-sheet ios-modal-safe">
+            <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-2.5 sm:hidden" />
             <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white text-sm">{task?.id ? 'Edit Commitment' : 'Add Commitment / Expense'}</h3>
-              <button onClick={onClose} className="text-slate-400 hover:text-white p-1"><Icon name="x" className="w-5 h-5" /></button>
+              <h3 className="font-bold text-white text-base">{task?.id ? 'Edit Commitment' : 'Add Commitment / Expense'}</h3>
+              <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-800 text-slate-300">
+                <Icon name="x" className="w-5 h-5" />
+              </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-4 space-y-3 text-xs text-slate-300 max-h-[82vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-3.5 text-sm text-slate-300 max-h-[82vh] overflow-y-auto">
               <div>
-                <label className="block font-semibold mb-1 text-slate-200">Commitment Title *</label>
-                <input type="text" required placeholder="e.g. Afinia Power, A/C Repair, Predial" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                <label className="block text-xs font-semibold mb-1 text-slate-300">Commitment Title *</label>
+                <input type="text" required placeholder="e.g. Afinia Power, A/C Repair, Predial" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white" />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1 text-slate-200">Pillar</label>
-                  <select value={formData.domain} onChange={e => setFormData({ ...formData, domain: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white">
+                  <label className="block text-xs font-semibold mb-1 text-slate-300">Pillar</label>
+                  <select value={formData.domain} onChange={e => setFormData({ ...formData, domain: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white">
                     {Object.values(DOMAINS).map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1 text-slate-200">Property / Asset</label>
-                  <input type="text" value={formData.propertyName} onChange={e => setFormData({ ...formData, propertyName: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                  <label className="block text-xs font-semibold mb-1 text-slate-300">Property / Asset</label>
+                  <input type="text" value={formData.propertyName} onChange={e => setFormData({ ...formData, propertyName: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white" />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1 text-slate-200">Amount (COP)</label>
-                  <input type="number" placeholder="520000" value={formData.amountCOP} onChange={e => setFormData({ ...formData, amountCOP: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold" />
+                  <label className="block text-xs font-semibold mb-1 text-slate-300">Amount (COP)</label>
+                  <input type="number" inputMode="numeric" placeholder="520000" value={formData.amountCOP} onChange={e => setFormData({ ...formData, amountCOP: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-bold" />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1 text-slate-200">Category</label>
-                  <input type="text" value={formData.subCategory} onChange={e => setFormData({ ...formData, subCategory: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                  <label className="block text-xs font-semibold mb-1 text-slate-300">Category</label>
+                  <input type="text" value={formData.subCategory} onChange={e => setFormData({ ...formData, subCategory: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white" />
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2.5">
-                <div className="font-bold text-emerald-400">Recurrence & Deadline Anchor</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
+                <div className="text-xs font-bold text-emerald-400">Recurrence & Deadline Anchor</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block mb-1 text-slate-300">Frequency</label>
-                    <select value={formData.recurrence} onChange={e => setFormData({ ...formData, recurrence: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
+                    <label className="block text-xs mb-1 text-slate-400">Frequency</label>
+                    <select value={formData.recurrence} onChange={e => setFormData({ ...formData, recurrence: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white">
                       {Object.entries(RECURRENCE_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                   </div>
                   {formData.recurrence === 'NONE' ? (
                     <div>
-                      <label className="block mb-1 text-slate-300">Due Date</label>
-                      <input type="datetime-local" value={formData.dueDate} onChange={e => setFormData({ ...formData, dueDate: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white" />
+                      <label className="block text-xs mb-1 text-slate-400">Due Date</label>
+                      <input type="datetime-local" value={formData.dueDate} onChange={e => setFormData({ ...formData, dueDate: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white" />
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
                       {(formData.recurrence === 'ANNUAL' || formData.recurrence === 'SEMI_ANNUAL') && (
                         <div>
-                          <label className="block mb-1 text-slate-300">Month</label>
-                          <select value={formData.dueMonth} onChange={e => setFormData({ ...formData, dueMonth: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white">
+                          <label className="block text-xs mb-1 text-slate-400">Month</label>
+                          <select value={formData.dueMonth} onChange={e => setFormData({ ...formData, dueMonth: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-white">
                             {MONTH_NAMES.map((m, idx) => <option key={idx} value={idx}>{m.slice(0, 3)}</option>)}
                           </select>
                         </div>
                       )}
                       <div>
-                        <label className="block mb-1 text-slate-300">Day</label>
-                        <input type="number" min="1" max="31" value={formData.dueDayOfMonth} onChange={e => setFormData({ ...formData, dueDayOfMonth: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white" />
+                        <label className="block text-xs mb-1 text-slate-400">Day</label>
+                        <input type="number" inputMode="numeric" min="1" max="31" value={formData.dueDayOfMonth} onChange={e => setFormData({ ...formData, dueDayOfMonth: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white" />
                       </div>
                     </div>
                   )}
@@ -1609,18 +2082,18 @@
               </div>
 
               <div>
-                <label className="block font-semibold mb-1 text-slate-200">Payment URL / PSE (Optional)</label>
-                <input type="url" placeholder="https://..." value={formData.paymentUrl} onChange={e => setFormData({ ...formData, paymentUrl: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                <label className="block text-xs font-semibold mb-1 text-slate-300">Payment URL / PSE (Optional)</label>
+                <input type="url" placeholder="https://..." value={formData.paymentUrl} onChange={e => setFormData({ ...formData, paymentUrl: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white" />
               </div>
 
               <div>
-                <label className="block font-semibold mb-1 text-slate-200">Notes</label>
-                <input type="text" placeholder="NIC, Contract #, reference notes..." value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                <label className="block text-xs font-semibold mb-1 text-slate-300">Notes</label>
+                <input type="text" placeholder="NIC, Contract #, reference notes..." value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white" />
               </div>
 
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
-                <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl">Save</button>
+                <button type="button" onClick={onClose} className="min-h-[44px] px-5 bg-slate-800 text-slate-300 rounded-xl font-bold text-xs">Cancel</button>
+                <button type="submit" className="min-h-[44px] px-6 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs">Save Commitment</button>
               </div>
             </form>
           </div>
@@ -1639,34 +2112,35 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-sheet ios-modal-safe">
+            <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-2.5 sm:hidden" />
             <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white text-sm">Log Payment & Advance Cycle</h3>
-              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+              <h3 className="font-bold text-white text-base">Confirm Payment</h3>
+              <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-800 text-slate-300"><Icon name="x" className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs text-slate-300">
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-sm text-slate-300">
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
                 <div className="font-bold text-white text-sm">{task.title}</div>
-                <div className="text-emerald-400 mt-0.5">{task.propertyName || task.location}</div>
+                <div className="text-emerald-400 text-xs mt-0.5">{task.propertyName || task.location}</div>
               </div>
               <div>
-                <label className="block font-semibold mb-1 text-slate-200">Actual Amount Paid (COP)</label>
-                <input type="number" required value={actualAmount} onChange={e => setActualAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold text-base" />
+                <label className="block text-xs font-semibold mb-1 text-slate-300">Actual Amount Paid (COP)</label>
+                <input type="number" inputMode="numeric" required value={actualAmount} onChange={e => setActualAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-bold" />
               </div>
               {task.recurrence && task.recurrence !== 'NONE' && (
-                <label className="flex items-center space-x-2 text-slate-300">
-                  <input type="checkbox" checked={updateBaseAmount} onChange={e => setUpdateBaseAmount(e.target.checked)} />
-                  <span>Update future estimate to {formatCOP(actualAmount)}</span>
+                <label className="flex items-center space-x-2.5 text-slate-300 text-xs py-1">
+                  <input type="checkbox" className="w-4 h-4 rounded" checked={updateBaseAmount} onChange={e => setUpdateBaseAmount(e.target.checked)} />
+                  <span>Update future baseline estimate to {formatCOP(actualAmount)}</span>
                 </label>
               )}
               <div>
-                <label className="block font-semibold mb-1 text-slate-200">Confirmation / Reference #</label>
-                <input type="text" placeholder="PSE #90218..." value={refNotes} onChange={e => setRefNotes(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                <label className="block text-xs font-semibold mb-1 text-slate-300">Confirmation / Reference #</label>
+                <input type="text" placeholder="PSE #90218..." value={refNotes} onChange={e => setRefNotes(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white" />
               </div>
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
-                <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl">Confirm Payment</button>
+                <button type="button" onClick={onClose} className="min-h-[44px] px-5 bg-slate-800 text-slate-300 rounded-xl font-bold text-xs">Cancel</button>
+                <button type="submit" className="min-h-[44px] px-6 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs">Confirm & Advance</button>
               </div>
             </form>
           </div>
@@ -1676,28 +2150,31 @@
 
     function PresetsModal({ onClose, onSelectPreset }) {
       return (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-sheet ios-modal-safe">
+            <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-2.5 sm:hidden" />
             <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white text-sm">Colombia Utility & Tax Presets</h3>
-              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+              <h3 className="font-bold text-white text-base">Colombia Quick Presets</h3>
+              <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-800 text-slate-300"><Icon name="x" className="w-5 h-5" /></button>
             </div>
-            <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto text-xs text-slate-300">
+            <div className="p-4 space-y-4 max-h-[78vh] overflow-y-auto text-xs text-slate-300">
               {PRESET_COLOMBIA_TEMPLATES.map((cat, idx) => (
-                <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div key={idx} className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                     <span className="font-bold text-white">{cat.category}</span>
-                    <button onClick={() => onSelectPreset(cat.items)} className="px-2.5 py-1 bg-emerald-500 text-slate-950 font-bold rounded-lg">
+                    <button onClick={() => onSelectPreset(cat.items)} className="min-h-[34px] px-3 bg-emerald-500 text-slate-950 font-bold rounded-xl">
                       Load All ({cat.items.length})
                     </button>
                   </div>
                   {cat.items.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between bg-slate-900 p-2 rounded-lg">
+                    <div key={i} className="flex items-center justify-between bg-slate-900 p-2.5 rounded-xl">
                       <div>
                         <div className="font-semibold text-white">{item.title}</div>
                         <div className="text-[10px] text-slate-400">Day {item.dueDayOfMonth} • {item.recurrence}</div>
                       </div>
-                      <button onClick={() => onSelectPreset([item])} className="text-emerald-400 font-bold hover:underline">+ Add</button>
+                      <button onClick={() => onSelectPreset([item])} className="min-h-[34px] px-3 bg-emerald-500/15 text-emerald-400 font-bold rounded-xl">
+                        + Add
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1711,20 +2188,21 @@
     function PaymentHistoryModal({ task, onClose }) {
       const history = task.paymentHistory || [];
       return (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-sheet ios-modal-safe">
+            <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-2.5 sm:hidden" />
             <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white text-sm">Payment History: {task.title}</h3>
-              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+              <h3 className="font-bold text-white text-sm truncate pr-2">History: {task.title}</h3>
+              <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-800 text-slate-300"><Icon name="x" className="w-5 h-5" /></button>
             </div>
-            <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto text-xs">
+            <div className="p-4 space-y-2.5 max-h-[65vh] overflow-y-auto text-xs">
               {history.map(r => (
-                <div key={r.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center">
+                <div key={r.id} className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 flex justify-between items-center">
                   <div>
                     <div className="font-bold text-white">{new Date(r.paidAt).toLocaleDateString()}</div>
-                    <div className="text-[10px] text-slate-400">{r.refNotes}</div>
+                    <div className="text-[11px] text-slate-400">{r.refNotes}</div>
                   </div>
-                  <div className="font-bold text-emerald-400">{formatCOP(r.amountCOP)}</div>
+                  <div className="font-extrabold text-emerald-400">{formatCOP(r.amountCOP)}</div>
                 </div>
               ))}
             </div>
@@ -1733,7 +2211,7 @@
       );
     }
 
-    function SettingsModal({ config, status, onClose, onSaveConfig }) {
+    function SettingsModal({ config, status, tasks, fxRates, onClose, onSaveConfig }) {
       const [inputConfig, setInputConfig] = useState(() => {
         if (!config) return '';
         try {
@@ -1759,43 +2237,68 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-sheet ios-modal-safe">
+            <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-2.5 sm:hidden" />
             <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white text-sm">Firebase Cloud Sync Setup</h3>
-              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+              <h3 className="font-bold text-white text-base">Cloud Sync & Backups</h3>
+              <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-800 text-slate-300"><Icon name="x" className="w-5 h-5" /></button>
             </div>
-            <div className="p-5 space-y-4 text-xs text-slate-300">
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-                <span>Sync Status:</span>
+            <div className="p-5 space-y-4 text-xs text-slate-300 max-h-[82vh] overflow-y-auto">
+              <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
+                <span className="font-semibold">Sync Status:</span>
                 <span className={`font-bold ${status === 'CONNECTED' ? 'text-emerald-400' : status === 'ERROR' ? 'text-rose-400' : 'text-amber-400'}`}>
-                  {status === 'CONNECTED' ? '● Connected to Firebase Cloud' : status === 'ERROR' ? '● Check Firebase Rules / Auth' : '● Local Device Storage Only'}
+                  {status === 'CONNECTED' ? '● Firebase Connected' : status === 'ERROR' ? '● Check Rules / Auth' : '● Local Storage Only'}
                 </span>
               </div>
+
               <div>
                 <label className="block font-semibold mb-1 text-slate-200">
-                  Paste your Firebase Config (from Firebase Project Settings)
+                  Firebase Config Snippet
                 </label>
                 <textarea
-                  rows={7}
+                  rows={6}
                   placeholder={'const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  authDomain: "...",\n  projectId: "..."\n};'}
                   value={inputConfig}
                   onChange={e => handleTextChange(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-emerald-400 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-emerald-400 font-mono focus:outline-none focus:border-emerald-500"
                 />
                 {parsePreviewError ? (
                   <p className="text-[11px] text-amber-400 mt-1">{parsePreviewError}</p>
                 ) : inputConfig.trim() ? (
                   <p className="text-[11px] text-emerald-400 mt-1">✓ Valid Firebase credentials detected.</p>
                 ) : (
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Paste the entire <code>const firebaseConfig = &#123; ... &#125;;</code> block directly from Firebase Console.
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Paste your <code>const firebaseConfig = &#123; ... &#125;;</code> block from Firebase Console.
                   </p>
                 )}
               </div>
+
+              <div className="pt-2 border-t border-slate-800 space-y-2">
+                <div className="font-bold text-slate-300">CSV Data Exports</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportCommitmentsToCSV(tasks, fxRates)}
+                    className="min-h-[42px] px-3 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl font-semibold flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="file-spreadsheet" className="w-4 h-4 text-emerald-400" />
+                    <span>Commitments</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportPaymentHistoryToCSV(tasks, fxRates)}
+                    className="min-h-[42px] px-3 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl font-semibold flex items-center justify-center gap-1.5"
+                  >
+                    <Icon name="history" className="w-4 h-4 text-blue-400" />
+                    <span>Payment Log</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
-                <button onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Close</button>
-                <button onClick={() => onSaveConfig(inputConfig)} className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl">
+                <button onClick={onClose} className="min-h-[44px] px-5 bg-slate-800 text-slate-300 rounded-xl font-bold">Close</button>
+                <button onClick={() => onSaveConfig(inputConfig)} className="min-h-[44px] px-5 bg-emerald-500 text-slate-950 font-bold rounded-xl">
                   Save & Connect
                 </button>
               </div>
