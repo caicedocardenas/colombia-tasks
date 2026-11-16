@@ -31,7 +31,6 @@
       color: #f1f5f9;
       -webkit-tap-highlight-color: transparent;
     }
-    /* Custom subtle scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #0f172a; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
@@ -58,7 +57,6 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // Lightweight Lucide Icon Wrapper for CDN usage
     function Icon({ name, className = "w-4 h-4" }) {
       const spanRef = useRef(null);
       useEffect(() => {
@@ -70,7 +68,35 @@
       return <span ref={spanRef} className="inline-flex items-center justify-center shrink-0" />;
     }
 
-    // --- CONSTANTS & DOMAIN DEFINITIONS ---
+    // Safe Firebase Config Parser (handles raw JS snippets, quoted/unquoted keys, URLs, trailing commas)
+    function parseFirebaseConfigInput(rawInput) {
+      if (!rawInput || !rawInput.trim()) return null;
+      const trimmed = rawInput.trim();
+
+      // 1. Try direct JSON.parse first
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && parsed.apiKey && parsed.projectId) return parsed;
+      } catch (e) {}
+
+      // 2. Extract known Firebase keys safely via regex without corrupting URLs
+      const keys = ['apiKey', 'authDomain', 'databaseURL', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'measurementId'];
+      const extracted = {};
+      keys.forEach(key => {
+        const regex = new RegExp(`["']?${key}["']?\\s*:\\s*["']([^"']+)["']`);
+        const match = trimmed.match(regex);
+        if (match && match[1]) {
+          extracted[key] = match[1].trim();
+        }
+      });
+
+      if (extracted.apiKey && extracted.projectId) {
+        return extracted;
+      }
+
+      return null;
+    }
+
     const DOMAINS = {
       PROPERTIES: { id: 'PROPERTIES', label: 'Properties', icon: 'building-2', color: '#10b981', bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' },
       BUSINESSES: { id: 'BUSINESSES', label: 'Businesses', icon: 'briefcase', color: '#3b82f6', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/30' },
@@ -423,8 +449,13 @@
             return;
           }
 
+          const config = parseFirebaseConfigInput(rawConfig);
+          if (!config) {
+            setFirebaseStatus('ERROR');
+            return;
+          }
+
           try {
-            const config = JSON.parse(rawConfig);
             const fb = window.FirebaseSDK;
             const app = fb.getApps().length === 0 ? fb.initializeApp(config) : fb.getApp();
             const auth = fb.getAuth(app);
@@ -468,7 +499,6 @@
           if (cloudTasks.length > 0) {
             setTasks(cloudTasks);
           } else {
-            // Seed initial tasks to cloud on first connection if cloud is empty
             tasks.forEach(t => {
               fb.setDoc(fb.doc(dbInstance, 'artifacts', appId, 'users', user.uid, 'commitments', t.id), t);
             });
@@ -875,11 +905,13 @@
                   className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition ${
                     firebaseStatus === 'CONNECTED'
                       ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400'
+                      : firebaseStatus === 'ERROR'
+                      ? 'bg-rose-950/50 border-rose-500/40 text-rose-400'
                       : 'bg-amber-950/50 border-amber-500/40 text-amber-400'
                   }`}
                 >
                   <Icon name="settings" className="w-3.5 h-3.5" />
-                  <span>{firebaseStatus === 'CONNECTED' ? 'Cloud Synced' : 'Cloud Setup'}</span>
+                  <span>{firebaseStatus === 'CONNECTED' ? 'Cloud Synced' : firebaseStatus === 'ERROR' ? 'Config Error' : 'Cloud Setup'}</span>
                 </button>
 
                 <button
@@ -1323,7 +1355,6 @@
                   </div>
                 </div>
 
-                {/* VISUAL STACKED BARS (PURE CSS/TAILWIND FOR ZERO CRASHES ON MOBILE) */}
                 <div className="space-y-3 pt-2">
                   {projectionDataDetailed.map((row, idx) => {
                     const maxMonthCOP = Math.max(...projectionDataDetailed.map(r => r.amountCOP), 1);
@@ -1444,19 +1475,21 @@
               config={localStorage.getItem('firebase_custom_config') || ''}
               status={firebaseStatus}
               onClose={() => setIsSettingsOpen(false)}
-              onSaveConfig={(cfg) => {
-                try {
-                  if (cfg.trim() === '') {
-                    localStorage.removeItem('firebase_custom_config');
-                  } else {
-                    JSON.parse(cfg);
-                    localStorage.setItem('firebase_custom_config', cfg);
-                  }
-                  showToast('Saved config. Reloading...', 'success');
-                  setTimeout(() => window.location.reload(), 900);
-                } catch (e) {
-                  showToast('Invalid JSON format. Check your Firebase snippet.', 'error');
+              onSaveConfig={(rawInput) => {
+                if (!rawInput || rawInput.trim() === '') {
+                  localStorage.removeItem('firebase_custom_config');
+                  showToast('Disconnected Firebase. Using local storage.', 'info');
+                  setTimeout(() => window.location.reload(), 800);
+                  return;
                 }
+                const parsed = parseFirebaseConfigInput(rawInput);
+                if (!parsed) {
+                  showToast('Could not find apiKey and projectId. Paste the full firebaseConfig snippet.', 'error');
+                  return;
+                }
+                localStorage.setItem('firebase_custom_config', JSON.stringify(parsed));
+                showToast('Firebase connected! Reloading...', 'success');
+                setTimeout(() => window.location.reload(), 800);
               }}
             />
           )}
@@ -1701,24 +1734,28 @@
     }
 
     function SettingsModal({ config, status, onClose, onSaveConfig }) {
-      const [inputConfig, setInputConfig] = useState(config || '');
-
-      const handlePasteFormat = (raw) => {
-        // Auto-extract JSON object even if user pastes the full JS const firebaseConfig = { ... }; snippet
-        const match = raw.match(/\{[\s\S]*\}/);
-        if (match) {
-          try {
-            // Convert unquoted JS object keys into valid JSON
-            const fixedJson = match[0]
-              .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2": ')
-              .replace(/'/g, '"')
-              .replace(/,\s*\}/g, '}');
-            JSON.parse(fixedJson);
-            setInputConfig(fixedJson);
-            return;
-          } catch (e) {}
+      const [inputConfig, setInputConfig] = useState(() => {
+        if (!config) return '';
+        try {
+          return JSON.stringify(JSON.parse(config), null, 2);
+        } catch (e) {
+          return config;
         }
+      });
+      const [parsePreviewError, setParsePreviewError] = useState(null);
+
+      const handleTextChange = (raw) => {
         setInputConfig(raw);
+        if (!raw.trim()) {
+          setParsePreviewError(null);
+          return;
+        }
+        const parsed = parseFirebaseConfigInput(raw);
+        if (parsed) {
+          setParsePreviewError(null);
+        } else {
+          setParsePreviewError('Paste the block containing apiKey and projectId from Firebase Console.');
+        }
       };
 
       return (
@@ -1731,8 +1768,8 @@
             <div className="p-5 space-y-4 text-xs text-slate-300">
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
                 <span>Sync Status:</span>
-                <span className={`font-bold ${status === 'CONNECTED' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {status === 'CONNECTED' ? '● Connected to Firebase Cloud' : '● Local Device Storage Only'}
+                <span className={`font-bold ${status === 'CONNECTED' ? 'text-emerald-400' : status === 'ERROR' ? 'text-rose-400' : 'text-amber-400'}`}>
+                  {status === 'CONNECTED' ? '● Connected to Firebase Cloud' : status === 'ERROR' ? '● Check Firebase Rules / Auth' : '● Local Device Storage Only'}
                 </span>
               </div>
               <div>
@@ -1740,15 +1777,21 @@
                   Paste your Firebase Config (from Firebase Project Settings)
                 </label>
                 <textarea
-                  rows={6}
-                  placeholder='Paste your firebaseConfig object here...'
+                  rows={7}
+                  placeholder={'const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  authDomain: "...",\n  projectId: "..."\n};'}
                   value={inputConfig}
-                  onChange={e => handlePasteFormat(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-emerald-400 font-mono text-[11px]"
+                  onChange={e => handleTextChange(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-emerald-400 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  You can paste the raw snippet directly from Firebase Console; it will format automatically.
-                </p>
+                {parsePreviewError ? (
+                  <p className="text-[11px] text-amber-400 mt-1">{parsePreviewError}</p>
+                ) : inputConfig.trim() ? (
+                  <p className="text-[11px] text-emerald-400 mt-1">✓ Valid Firebase credentials detected.</p>
+                ) : (
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Paste the entire <code>const firebaseConfig = &#123; ... &#125;;</code> block directly from Firebase Console.
+                  </p>
+                )}
               </div>
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
                 <button onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Close</button>
