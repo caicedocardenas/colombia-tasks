@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Colombia Tasks" />
+  <title>Colombia Personal Commitment & Task Manager</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #020617;
+      color: #f1f5f9;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* Custom subtle scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-slate-950">
+  <div id="root"></div>
+
+  <!-- Firebase Modular SDK Bridge -->
+  <script type="module">
+    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.FirebaseSDK = {
+      initializeApp, getApps, getApp,
+      getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+      getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc
+    };
+    window.dispatchEvent(new Event('firebase-sdk-ready'));
+  </script>
+
+  <!-- Main React Application -->
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // Lightweight Lucide Icon Wrapper for CDN usage
+    function Icon({ name, className = "w-4 h-4" }) {
+      const spanRef = useRef(null);
+      useEffect(() => {
+        if (spanRef.current && window.lucide) {
+          spanRef.current.innerHTML = `<i data-lucide="${name}" class="${className}"></i>`;
+          window.lucide.createIcons({ root: spanRef.current });
+        }
+      }, [name, className]);
+      return <span ref={spanRef} className="inline-flex items-center justify-center shrink-0" />;
+    }
+
+    // --- CONSTANTS & DOMAIN DEFINITIONS ---
+    const DOMAINS = {
+      PROPERTIES: { id: 'PROPERTIES', label: 'Properties', icon: 'building-2', color: '#10b981', bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+      BUSINESSES: { id: 'BUSINESSES', label: 'Businesses', icon: 'briefcase', color: '#3b82f6', bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/30' },
+      COMMITMENTS: { id: 'COMMITMENTS', label: 'Legal & Financial', icon: 'file-text', color: '#f59e0b', bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
+      FAMILY: { id: 'FAMILY', label: 'Family in Colombia', icon: 'users', color: '#ec4899', bg: 'bg-pink-500/10', text: 'text-pink-400', border: 'border-pink-500/30' }
+    };
+
+    const RECURRENCE_TYPES = {
+      NONE: { label: 'One-Time / Ad-Hoc', months: 0 },
+      MONTHLY: { label: 'Monthly (1 mo)', months: 1 },
+      BI_MONTHLY: { label: 'Bi-Monthly (Every 2 mo)', months: 2 },
+      QUARTERLY: { label: 'Quarterly (Every 3 mo)', months: 3 },
+      SEMI_ANNUAL: { label: 'Semi-Annual (Every 6 mo)', months: 6 },
+      ANNUAL: { label: 'Annual (Every 12 mo)', months: 12 },
+    };
+
+    const MONTH_NAMES = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    const DEFAULT_FX_RATES = {
+      COP: 1,
+      USD: 0.00025,
+      EUR: 0.00023,
+      QAR: 0.00091
+    };
+
+    function getNextDateForDay(dayOfMonth = 15) {
+      const now = new Date();
+      let year = now.getFullYear();
+      let month = now.getMonth();
+      if (now.getDate() > dayOfMonth) {
+        month += 1;
+        if (month > 11) { month = 0; year += 1; }
+      }
+      const maxDays = new Date(year, month + 1, 0).getDate();
+      return new Date(year, month, Math.min(dayOfMonth, maxDays), 23, 59, 59);
+    }
+
+    function getColombiaTimeInfo(utcDateString) {
+      const due = new Date(utcDateString);
+      const now = new Date();
+      const diffMs = due.getTime() - now.getTime();
+      const isOverdue = diffMs < 0;
+      const absDiff = Math.abs(diffMs);
+
+      const days = Math.floor(absDiff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((absDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+      const cotFormatted = due.toLocaleString('en-US', {
+        timeZone: 'America/Bogota',
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      });
+
+      return { isOverdue, days, hours, formattedCOT: `${cotFormatted} COT` };
+    }
+
+    function formatCOP(amount) {
+      return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount || 0);
+    }
+
+    function formatCurrency(amountCOP, currency, rates) {
+      const rate = rates[currency] || 1;
+      const value = (amountCOP || 0) * rate;
+      if (currency === 'COP') return formatCOP(amountCOP);
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(value);
+    }
+
+    function downloadCSV(csvContent, fileName) {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function exportCommitmentsToCSV(tasks, fxRates) {
+      const headers = [
+        'ID', 'Title', 'Pillar Domain', 'Property / Asset', 'SubCategory', 'City Location',
+        'Amount COP', 'Amount USD', 'Amount EUR', 'Amount QAR',
+        'Due Date (COT)', 'Recurrence Frequency', 'Fixed Day of Month',
+        'Priority', 'Status', 'Payment Portal URL', 'Notes'
+      ];
+      const rows = tasks.map(t => {
+        const cop = Number(t.amountCOP) || 0;
+        const usd = (cop * (fxRates.USD || 0.00025)).toFixed(2);
+        const eur = (cop * (fxRates.EUR || 0.00023)).toFixed(2);
+        const qar = (cop * (fxRates.QAR || 0.00091)).toFixed(2);
+        const cotDate = t.dueDate ? new Date(t.dueDate).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'N/A';
+        return [
+          `"${t.id}"`,
+          `"${(t.title || '').replace(/"/g, '""')}"`,
+          `"${t.domain || ''}"`,
+          `"${(t.propertyName || t.location || 'General').replace(/"/g, '""')}"`,
+          `"${(t.subCategory || '').replace(/"/g, '""')}"`,
+          `"${(t.location || '').replace(/"/g, '""')}"`,
+          cop, usd, eur, qar,
+          `"${cotDate}"`,
+          `"${t.recurrence || 'NONE'}"`,
+          t.dueDayOfMonth || 'N/A',
+          `"${t.priority || 'MEDIUM'}"`,
+          `"${t.status || 'PENDING'}"`,
+          `"${t.paymentUrl || ''}"`,
+          `"${(t.notes || '').replace(/"/g, '""')}"`
+        ].join(',');
+      });
+      downloadCSV([headers.join(','), ...rows].join('\n'), `Colombia_Commitments_${new Date().toISOString().slice(0, 10)}.csv`);
+    }
+
+    function exportPaymentHistoryToCSV(tasks, fxRates) {
+      const headers = ['Payment ID', 'Commitment Title', 'Pillar Domain', 'Property / Asset', 'Date Paid (COT)', 'Amount Paid COP', 'Amount Paid USD', 'Reference Notes'];
+      const rows = [];
+      tasks.forEach(t => {
+        (t.paymentHistory || []).forEach(p => {
+          const cop = Number(p.amountCOP) || 0;
+          const usd = (cop * (fxRates.USD || 0.00025)).toFixed(2);
+          const paidDate = p.paidAt ? new Date(p.paidAt).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'N/A';
+          rows.push([
+            `"${p.id}"`,
+            `"${(t.title || '').replace(/"/g, '""')}"`,
+            `"${t.domain || ''}"`,
+            `"${(t.propertyName || t.location || 'General').replace(/"/g, '""')}"`,
+            `"${paidDate}"`,
+            cop, usd,
+            `"${(p.refNotes || '').replace(/"/g, '""')}"`
+          ].join(','));
+        });
+      });
+      downloadCSV([headers.join(','), ...rows].join('\n'), `Colombia_Payment_Ledger_${new Date().toISOString().slice(0, 10)}.csv`);
+    }
+
+    const PRESET_COLOMBIA_TEMPLATES = [
+      {
+        category: 'Cartagena - Palmetto Sunset / Bocagrande',
+        items: [
+          { title: 'Afinia Power Utility (Cartagena)', domain: 'PROPERTIES', propertyName: 'Cartagena - Palmetto Sunset', location: 'Cartagena', subCategory: 'Electricity', amountCOP: 520000, paymentUrl: 'https://www.afinia.com.co/pagos-en-linea', recurrence: 'MONTHLY', dueDayOfMonth: 16, priority: 'HIGH', notes: 'NIC / Service ID: 4892011. Fixed bill cutoff around 16th.' },
+          { title: 'Veolia Water & Sanitation (Cartagena)', domain: 'PROPERTIES', propertyName: 'Cartagena - Palmetto Sunset', location: 'Cartagena', subCategory: 'Water & Sewer', amountCOP: 185000, paymentUrl: 'https://www.veolia.com.co/cartagena/pagos-pse', recurrence: 'MONTHLY', dueDayOfMonth: 22, priority: 'HIGH', notes: 'Contract # 104829. Due on 22nd.' },
+          { title: 'Surtigas Natural Gas (Cartagena)', domain: 'PROPERTIES', propertyName: 'Cartagena - Palmetto Sunset', location: 'Cartagena', subCategory: 'Gas Utility', amountCOP: 48000, paymentUrl: 'https://www.surtigas.com.co/pago-en-linea', recurrence: 'MONTHLY', dueDayOfMonth: 12, priority: 'MEDIUM', notes: 'User # 89402.' },
+          { title: 'Edificio Palmetto HOA Admin Fee', domain: 'PROPERTIES', propertyName: 'Cartagena - Palmetto Sunset', location: 'Cartagena', subCategory: 'Administración', amountCOP: 1350000, paymentUrl: 'https://www.bancolombia.com', recurrence: 'MONTHLY', dueDayOfMonth: 5, priority: 'HIGH', notes: 'Pay before 5th for early discount.' },
+          { title: 'Impuesto Predial Cartagena', domain: 'PROPERTIES', propertyName: 'Cartagena - Palmetto Sunset', location: 'Cartagena', subCategory: 'Municipal Tax', amountCOP: 4800000, paymentUrl: 'https://www.cartagena.gov.co/impuesto-predial', recurrence: 'ANNUAL', dueDayOfMonth: 30, dueMonth: 4, priority: 'HIGH', notes: 'Annual municipal tax in May.' }
+        ]
+      },
+      {
+        category: 'Bogotá - Apartment & Assets',
+        items: [
+          { title: 'Enel Codensa Power (Bogotá)', domain: 'PROPERTIES', propertyName: 'Bogotá - Rosales Apartment', location: 'Bogotá', subCategory: 'Electricity', amountCOP: 340000, paymentUrl: 'https://www.enel.com.co/es/personas/pagos-en-linea.html', recurrence: 'MONTHLY', dueDayOfMonth: 18, priority: 'HIGH', notes: 'Account # 4920182.' },
+          { title: 'Vanti Gas Natural (Bogotá)', domain: 'PROPERTIES', propertyName: 'Bogotá - Rosales Apartment', location: 'Bogotá', subCategory: 'Gas Utility', amountCOP: 62000, paymentUrl: 'https://www.grupovanti.com/pagos-en-linea', recurrence: 'MONTHLY', dueDayOfMonth: 14, priority: 'MEDIUM', notes: 'Account # 771920.' },
+          { title: 'EAAB Acueducto (Bogotá)', domain: 'PROPERTIES', propertyName: 'Bogotá - Rosales Apartment', location: 'Bogotá', subCategory: 'Water Utility', amountCOP: 220000, paymentUrl: 'https://www.acueducto.com.co/pagos', recurrence: 'BI_MONTHLY', dueDayOfMonth: 20, priority: 'HIGH', notes: 'Bi-monthly billing cycle.' },
+          { title: 'Edificio Rosales HOA Admin Fee', domain: 'PROPERTIES', propertyName: 'Bogotá - Rosales Apartment', location: 'Bogotá', subCategory: 'Administración', amountCOP: 1150000, paymentUrl: '', recurrence: 'MONTHLY', dueDayOfMonth: 10, priority: 'HIGH', notes: 'Direct transfer.' },
+          { title: 'Impuesto Predial Bogotá', domain: 'PROPERTIES', propertyName: 'Bogotá - Rosales Apartment', location: 'Bogotá', subCategory: 'Municipal Tax', amountCOP: 5900000, paymentUrl: 'https://www.haciendabogota.gov.co', recurrence: 'ANNUAL', dueDayOfMonth: 30, dueMonth: 5, priority: 'HIGH', notes: 'Due June 30.' }
+        ]
+      },
+      {
+        category: 'Ricaurte / Vacation Home',
+        items: [
+          { title: 'Enel Cundinamarca Electricity', domain: 'PROPERTIES', propertyName: 'Ricaurte - Puerto Azul Condo', location: 'Ricaurte', subCategory: 'Electricity', amountCOP: 280000, paymentUrl: 'https://www.enel.com.co', recurrence: 'MONTHLY', dueDayOfMonth: 15, priority: 'MEDIUM', notes: 'Vacation home power.' },
+          { title: 'Acueducto Ricaurte Water', domain: 'PROPERTIES', propertyName: 'Ricaurte - Puerto Azul Condo', location: 'Ricaurte', subCategory: 'Water Utility', amountCOP: 140000, paymentUrl: '', recurrence: 'MONTHLY', dueDayOfMonth: 25, priority: 'MEDIUM', notes: 'Water & sanitation.' },
+          { title: 'Puerto Azul HOA Admin Fee', domain: 'PROPERTIES', propertyName: 'Ricaurte - Puerto Azul Condo', location: 'Ricaurte', subCategory: 'Administración', amountCOP: 680000, paymentUrl: '', recurrence: 'MONTHLY', dueDayOfMonth: 5, priority: 'HIGH', notes: 'HOA Fee Ricaurte.' }
+        ]
+      },
+      {
+        category: 'Businesses & DIAN Tax Calendar',
+        items: [
+          { title: 'DIAN Retención en la Fuente', domain: 'BUSINESSES', propertyName: 'Corporate Entity', location: 'Bogotá', subCategory: 'Tax Obligation', amountCOP: 6500000, paymentUrl: 'https://www.dian.gov.co/PSE', recurrence: 'MONTHLY', dueDayOfMonth: 11, priority: 'HIGH', notes: 'Monthly tax withholding.' },
+          { title: 'DIAN Declaración IVA', domain: 'BUSINESSES', propertyName: 'Corporate Entity', location: 'Bogotá', subCategory: 'Tax Obligation', amountCOP: 9200000, paymentUrl: 'https://www.dian.gov.co/PSE', recurrence: 'BI_MONTHLY', dueDayOfMonth: 18, priority: 'HIGH', notes: 'Bi-monthly VAT.' },
+          { title: 'Cámara de Comercio Renewal', domain: 'BUSINESSES', propertyName: 'Corporate Entity', location: 'Bogotá', subCategory: 'Legal Registry', amountCOP: 1850000, paymentUrl: 'https://www.ccb.org.co', recurrence: 'ANNUAL', dueDayOfMonth: 31, dueMonth: 2, priority: 'HIGH', notes: 'Deadline March 31.' }
+        ]
+      },
+      {
+        category: 'Family in Colombia & Healthcare',
+        items: [
+          { title: 'Domestic Staff PILA Social Security', domain: 'FAMILY', propertyName: 'Family Obligations', location: 'Colombia', subCategory: 'Payroll / PILA', amountCOP: 1780000, paymentUrl: 'https://www.misiaporte.com', recurrence: 'MONTHLY', dueDayOfMonth: 5, priority: 'HIGH', notes: 'Health, Pension, ARL.' },
+          { title: 'SURA Prepagada & EPS Healthcare', domain: 'FAMILY', propertyName: 'Family Obligations', location: 'Colombia', subCategory: 'Healthcare', amountCOP: 2350000, paymentUrl: 'https://www.segurossura.com.co', recurrence: 'MONTHLY', dueDayOfMonth: 2, priority: 'HIGH', notes: 'Family medical plan.' }
+        ]
+      }
+    ];
+
+    const INITIAL_TASKS = [
+      {
+        id: 'task-1',
+        title: 'Afinia Power Utility - Cartagena Palmetto',
+        domain: 'PROPERTIES',
+        propertyName: 'Cartagena - Palmetto Sunset',
+        subCategory: 'Electricity',
+        location: 'Cartagena',
+        amountCOP: 520000,
+        paymentUrl: 'https://www.afinia.com.co/pagos-en-linea',
+        dueDate: getNextDateForDay(16).toISOString(),
+        recurrence: 'MONTHLY',
+        dueDayOfMonth: 16,
+        priority: 'HIGH',
+        status: 'PENDING',
+        notes: 'NIC 4892011. Afinia power deadline is 16th of each month.',
+        createdAt: new Date().toISOString(),
+        paymentHistory: []
+      },
+      {
+        id: 'task-2',
+        title: 'DIAN Retención en la Fuente - Operating Entity',
+        domain: 'BUSINESSES',
+        propertyName: 'Corporate Entity',
+        subCategory: 'Tax Obligation',
+        location: 'Bogotá',
+        amountCOP: 6800000,
+        paymentUrl: 'https://www.dian.gov.co/PSE',
+        dueDate: getNextDateForDay(11).toISOString(),
+        recurrence: 'MONTHLY',
+        dueDayOfMonth: 11,
+        priority: 'HIGH',
+        status: 'PENDING',
+        notes: 'NIT 901.248.112-4. Strict deadline with tax penalties.',
+        createdAt: new Date().toISOString(),
+        paymentHistory: []
+      },
+      {
+        id: 'task-3',
+        title: 'SURA Family Health Coverage (Prepagada & EPS)',
+        domain: 'FAMILY',
+        propertyName: 'Family Obligations',
+        subCategory: 'Healthcare',
+        location: 'Medellín / Cali',
+        amountCOP: 2350000,
+        paymentUrl: 'https://www.segurossura.com.co',
+        dueDate: getNextDateForDay(2).toISOString(),
+        recurrence: 'MONTHLY',
+        dueDayOfMonth: 2,
+        priority: 'HIGH',
+        status: 'PENDING',
+        notes: 'Covers parents EPS + Medicina Prepagada plan.',
+        createdAt: new Date().toISOString(),
+        paymentHistory: []
+      },
+      {
+        id: 'task-4',
+        title: 'Impuesto Predial Cartagena - Palmetto Unit',
+        domain: 'PROPERTIES',
+        propertyName: 'Cartagena - Palmetto Sunset',
+        subCategory: 'Municipal Tax',
+        location: 'Cartagena',
+        amountCOP: 4800000,
+        paymentUrl: 'https://www.cartagena.gov.co/impuesto-predial',
+        dueDate: new Date(new Date().getFullYear(), 4, 30, 23, 59, 59).toISOString(),
+        recurrence: 'ANNUAL',
+        dueDayOfMonth: 30,
+        dueMonth: 4,
+        priority: 'HIGH',
+        status: 'PENDING',
+        notes: 'Catastral: 01-02-0344-0012-000.',
+        createdAt: new Date().toISOString(),
+        paymentHistory: []
+      },
+      {
+        id: 'task-5',
+        title: 'Edificio Rosales HOA Admin Fee',
+        domain: 'PROPERTIES',
+        propertyName: 'Bogotá - Rosales Apartment',
+        subCategory: 'Administración',
+        location: 'Bogotá',
+        amountCOP: 1150000,
+        paymentUrl: '',
+        dueDate: getNextDateForDay(5).toISOString(),
+        recurrence: 'MONTHLY',
+        dueDayOfMonth: 5,
+        priority: 'MEDIUM',
+        status: 'PENDING',
+        notes: 'Direct Bancolombia transfer to Admin account.',
+        createdAt: new Date().toISOString(),
+        paymentHistory: []
+      },
+      {
+        id: 'task-6',
+        title: 'Enel Cundinamarca Electricity (Ricaurte)',
+        domain: 'PROPERTIES',
+        propertyName: 'Ricaurte - Puerto Azul Condo',
+        subCategory: 'Electricity',
+        location: 'Ricaurte',
+        amountCOP: 280000,
+        paymentUrl: 'https://www.enel.com.co',
+        dueDate: getNextDateForDay(15).toISOString(),
+        recurrence: 'MONTHLY',
+        dueDayOfMonth: 15,
+        priority: 'MEDIUM',
+        status: 'PENDING',
+        notes: 'Vacation home power bill.',
+        createdAt: new Date().toISOString(),
+        paymentHistory: []
+      }
+    ];
+
+    function App() {
+      const [tasks, setTasks] = useState(() => {
+        try {
+          const saved = localStorage.getItem('colombia_tasks_v3');
+          return saved ? JSON.parse(saved) : INITIAL_TASKS;
+        } catch (e) {
+          return INITIAL_TASKS;
+        }
+      });
+
+      const [user, setUser] = useState(null);
+      const [dbInstance, setDbInstance] = useState(null);
+      const [firebaseStatus, setFirebaseStatus] = useState(() => {
+        return localStorage.getItem('firebase_custom_config') ? 'CONNECTING' : 'LOCAL';
+      });
+
+      const [selectedDomain, setSelectedDomain] = useState('ALL');
+      const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [activeCurrency, setActiveCurrency] = useState('USD');
+      const [fxRates] = useState(DEFAULT_FX_RATES);
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [projectionsGroupMode, setProjectionsGroupMode] = useState('PILLAR');
+
+      const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date());
+      const [selectedCalendarDay, setSelectedCalendarDay] = useState(new Date().getDate());
+
+      const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [editingTask, setEditingTask] = useState(null);
+      const [isPresetsOpen, setIsPresetsOpen] = useState(false);
+      const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+      const [historyModalTask, setHistoryModalTask] = useState(null);
+      const [payingTask, setPayingTask] = useState(null);
+      const [toastMessage, setToastMessage] = useState(null);
+      const [nowTick, setNowTick] = useState(Date.now());
+
+      const appId = 'colombia-commitments-app';
+
+      const showToast = (msg, type = 'info') => {
+        setToastMessage({ msg, type });
+        setTimeout(() => setToastMessage(null), 4000);
+      };
+
+      // --- INITIALIZE FIREBASE FROM SAVED CONFIG ---
+      useEffect(() => {
+        const connectFirebase = () => {
+          const rawConfig = localStorage.getItem('firebase_custom_config');
+          if (!rawConfig || !window.FirebaseSDK) {
+            setFirebaseStatus('LOCAL');
+            return;
+          }
+
+          try {
+            const config = JSON.parse(rawConfig);
+            const fb = window.FirebaseSDK;
+            const app = fb.getApps().length === 0 ? fb.initializeApp(config) : fb.getApp();
+            const auth = fb.getAuth(app);
+            const db = fb.getFirestore(app);
+            setDbInstance(db);
+
+            fb.signInAnonymously(auth).catch(err => {
+              console.error("Anonymous sign-in error:", err);
+              setFirebaseStatus('ERROR');
+            });
+
+            fb.onAuthStateChanged(auth, (u) => {
+              setUser(u);
+              if (u) setFirebaseStatus('CONNECTED');
+            });
+          } catch (err) {
+            console.error("Firebase init error:", err);
+            setFirebaseStatus('ERROR');
+          }
+        };
+
+        if (window.FirebaseSDK) {
+          connectFirebase();
+        } else {
+          window.addEventListener('firebase-sdk-ready', connectFirebase);
+          return () => window.removeEventListener('firebase-sdk-ready', connectFirebase);
+        }
+      }, []);
+
+      // --- FIRESTORE REALTIME LISTENER ---
+      useEffect(() => {
+        if (!user || !dbInstance || !window.FirebaseSDK) return;
+        const fb = window.FirebaseSDK;
+        const colRef = fb.collection(dbInstance, 'artifacts', appId, 'users', user.uid, 'commitments');
+
+        const unsubscribe = fb.onSnapshot(colRef, (snapshot) => {
+          const cloudTasks = [];
+          snapshot.forEach((docSnap) => {
+            cloudTasks.push({ ...docSnap.data(), id: docSnap.id });
+          });
+          if (cloudTasks.length > 0) {
+            setTasks(cloudTasks);
+          } else {
+            // Seed initial tasks to cloud on first connection if cloud is empty
+            tasks.forEach(t => {
+              fb.setDoc(fb.doc(dbInstance, 'artifacts', appId, 'users', user.uid, 'commitments', t.id), t);
+            });
+          }
+          setFirebaseStatus('CONNECTED');
+        }, (error) => {
+          console.error("Firestore sync error:", error);
+          setFirebaseStatus('ERROR');
+        });
+
+        return () => unsubscribe();
+      }, [user, dbInstance]);
+
+      const syncTaskToStore = async (taskObj) => {
+        if (user && dbInstance && window.FirebaseSDK) {
+          try {
+            const fb = window.FirebaseSDK;
+            await fb.setDoc(fb.doc(dbInstance, 'artifacts', appId, 'users', user.uid, 'commitments', taskObj.id), taskObj);
+          } catch (err) {
+            console.error("Firestore write error:", err);
+          }
+        }
+      };
+
+      const syncDeleteToStore = async (taskId) => {
+        if (user && dbInstance && window.FirebaseSDK) {
+          try {
+            const fb = window.FirebaseSDK;
+            await fb.deleteDoc(fb.doc(dbInstance, 'artifacts', appId, 'users', user.uid, 'commitments', taskId));
+          } catch (err) {
+            console.error("Firestore delete error:", err);
+          }
+        }
+      };
+
+      useEffect(() => {
+        const timer = setInterval(() => setNowTick(Date.now()), 60000);
+        return () => clearInterval(timer);
+      }, []);
+
+      useEffect(() => {
+        if (tasks.length > 0) {
+          localStorage.setItem('colombia_tasks_v3', JSON.stringify(tasks));
+        }
+      }, [tasks]);
+
+      const handleSaveTask = (taskData) => {
+        if (editingTask && editingTask.id) {
+          const updatedTask = { ...editingTask, ...taskData };
+          setTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
+          syncTaskToStore(updatedTask);
+          showToast('Commitment updated!', 'success');
+        } else {
+          const newTask = {
+            ...taskData,
+            id: `task-${Date.now()}`,
+            status: 'PENDING',
+            createdAt: new Date().toISOString(),
+            paymentHistory: []
+          };
+          setTasks(prev => [newTask, ...prev]);
+          syncTaskToStore(newTask);
+          showToast('New commitment added!', 'success');
+        }
+        setIsModalOpen(false);
+        setEditingTask(null);
+      };
+
+      const deleteTaskFromStore = (id) => {
+        setTasks(prev => prev.filter(t => t.id !== id));
+        syncDeleteToStore(id);
+        showToast('Commitment removed', 'info');
+      };
+
+      const handleConfirmPayment = ({ actualAmountCOP, refNotes, updateBaseAmount }) => {
+        if (!payingTask) return;
+        const task = payingTask;
+        const isRecurring = task.recurrence && task.recurrence !== 'NONE';
+        const now = new Date();
+
+        const newHistoryRecord = {
+          id: `pay-${Date.now()}`,
+          paidAt: now.toISOString(),
+          amountCOP: Number(actualAmountCOP) || task.amountCOP,
+          refNotes: refNotes || `Paid on ${now.toLocaleDateString()}`
+        };
+
+        const existingHistory = task.paymentHistory || [];
+
+        if (isRecurring) {
+          const currentDue = new Date(task.dueDate);
+          const recMonths = RECURRENCE_TYPES[task.recurrence]?.months || 1;
+          const targetDay = Number(task.dueDayOfMonth) || 15;
+          const targetMonth = Number(task.dueMonth !== undefined ? task.dueMonth : currentDue.getMonth());
+
+          let nextYear = currentDue.getFullYear();
+          let nextMonth = currentDue.getMonth() + recMonths;
+
+          if (task.recurrence === 'ANNUAL') {
+            nextYear = currentDue.getFullYear() + 1;
+            nextMonth = targetMonth;
+          } else if (nextMonth > 11) {
+            nextYear += Math.floor(nextMonth / 12);
+            nextMonth = nextMonth % 12;
+          }
+
+          const maxDays = new Date(nextYear, nextMonth + 1, 0).getDate();
+          const actualDay = Math.min(targetDay, maxDays);
+          const nextDueDate = new Date(nextYear, nextMonth, actualDay, 23, 59, 59);
+
+          const updatedTask = {
+            ...task,
+            amountCOP: updateBaseAmount ? (Number(actualAmountCOP) || task.amountCOP) : task.amountCOP,
+            dueDate: nextDueDate.toISOString(),
+            status: 'PENDING',
+            paymentHistory: [newHistoryRecord, ...existingHistory]
+          };
+
+          setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
+          syncTaskToStore(updatedTask);
+          showToast(`Paid! Next due: ${nextDueDate.toLocaleDateString('es-CO')}`, 'success');
+        } else {
+          const updatedTask = {
+            ...task,
+            amountCOP: Number(actualAmountCOP) || task.amountCOP,
+            status: 'COMPLETED',
+            paymentHistory: [newHistoryRecord, ...existingHistory]
+          };
+          setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
+          syncTaskToStore(updatedTask);
+          showToast('Payment logged & task completed!', 'success');
+        }
+        setPayingTask(null);
+      };
+
+      const handleLoadPresets = (presetItems) => {
+        const newTasks = presetItems.map((item, index) => ({
+          ...item,
+          id: `preset-${Date.now()}-${index}`,
+          dueDate: getNextDateForDay(item.dueDayOfMonth).toISOString(),
+          status: 'PENDING',
+          createdAt: new Date().toISOString(),
+          paymentHistory: []
+        }));
+        setTasks(prev => [...newTasks, ...prev]);
+        newTasks.forEach(t => syncTaskToStore(t));
+        setIsPresetsOpen(false);
+        showToast(`Loaded ${presetItems.length} commitment rules!`, 'success');
+      };
+
+      const filteredTasks = useMemo(() => {
+        return tasks.filter(task => {
+          const matchesDomain = selectedDomain === 'ALL' || task.domain === selectedDomain;
+          const matchesStatus = selectedStatus === 'ALL'
+            ? true
+            : selectedStatus === 'COMPLETED'
+            ? task.status === 'COMPLETED'
+            : task.status !== 'COMPLETED';
+          const matchesQuery = !searchQuery ||
+            task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (task.propertyName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (task.location || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (task.subCategory || '').toLowerCase().includes(searchQuery.toLowerCase());
+          return matchesDomain && matchesStatus && matchesQuery;
+        });
+      }, [tasks, selectedDomain, selectedStatus, searchQuery]);
+
+      const propertyNamesList = useMemo(() => {
+        const set = new Set();
+        tasks.forEach(t => {
+          if (t.propertyName) set.add(t.propertyName);
+          else if (t.location) set.add(t.location);
+        });
+        return Array.from(set);
+      }, [tasks]);
+
+      const currentMonthAnalytics = useMemo(() => {
+        const now = new Date();
+        const curMonth = now.getMonth();
+        const curYear = now.getFullYear();
+
+        let totalMonthCOP = 0;
+        const byPillar = { PROPERTIES: 0, BUSINESSES: 0, COMMITMENTS: 0, FAMILY: 0 };
+        const byProperty = {};
+        const byCategory = {};
+        let itemsCount = 0;
+
+        tasks.forEach(task => {
+          if (task.status === 'COMPLETED') return;
+          const due = new Date(task.dueDate);
+          const amount = Number(task.amountCOP) || 0;
+          const recMonths = RECURRENCE_TYPES[task.recurrence]?.months || 0;
+
+          let isDue = false;
+          if (recMonths === 0) {
+            if (due.getMonth() === curMonth && due.getFullYear() === curYear) isDue = true;
+          } else {
+            let checkYear = due.getFullYear();
+            let checkMonth = due.getMonth();
+            while (checkYear > curYear || (checkYear === curYear && checkMonth > curMonth)) {
+              checkMonth -= recMonths;
+              if (checkMonth < 0) {
+                checkYear -= Math.ceil(Math.abs(checkMonth) / 12);
+                checkMonth = ((checkMonth % 12) + 12) % 12;
+              }
+            }
+            while (checkYear < curYear || (checkYear === curYear && checkMonth <= curMonth)) {
+              if (checkYear === curYear && checkMonth === curMonth) { isDue = true; break; }
+              checkMonth += recMonths;
+              if (checkMonth > 11) {
+                checkYear += Math.floor(checkMonth / 12);
+                checkMonth = checkMonth % 12;
+              }
+            }
+          }
+
+          if (isDue) {
+            totalMonthCOP += amount;
+            itemsCount++;
+            if (byPillar[task.domain] !== undefined) byPillar[task.domain] += amount;
+            const prop = task.propertyName || task.location || 'General Asset';
+            byProperty[prop] = (byProperty[prop] || 0) + amount;
+            const cat = task.subCategory || 'General';
+            byCategory[cat] = (byCategory[cat] || 0) + amount;
+          }
+        });
+
+        return {
+          totalMonthCOP,
+          byPillar,
+          byProperty,
+          byCategory,
+          itemsCount,
+          monthName: now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+        };
+      }, [tasks, nowTick]);
+
+      const projectionDataDetailed = useMemo(() => {
+        const monthBuckets = [];
+        const now = new Date();
+
+        for (let i = 0; i < 12; i++) {
+          const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+          const monthLabel = futureDate.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+          const targetMonth = futureDate.getMonth();
+          const targetYear = futureDate.getFullYear();
+
+          let totalCOP = 0;
+          let itemsCount = 0;
+          const byPillar = { PROPERTIES: 0, BUSINESSES: 0, COMMITMENTS: 0, FAMILY: 0 };
+          const byProperty = {};
+
+          tasks.forEach(task => {
+            if (task.status === 'COMPLETED') return;
+            const due = new Date(task.dueDate);
+            const amount = Number(task.amountCOP) || 0;
+            const recMonths = RECURRENCE_TYPES[task.recurrence]?.months || 0;
+            const propName = task.propertyName || task.location || 'General';
+
+            let isDue = false;
+            if (recMonths === 0) {
+              if (due.getMonth() === targetMonth && due.getFullYear() === targetYear) isDue = true;
+            } else {
+              let checkYear = due.getFullYear();
+              let checkMonth = due.getMonth();
+              while (checkYear > targetYear || (checkYear === targetYear && checkMonth > targetMonth)) {
+                checkMonth -= recMonths;
+                if (checkMonth < 0) {
+                  checkYear -= Math.ceil(Math.abs(checkMonth) / 12);
+                  checkMonth = ((checkMonth % 12) + 12) % 12;
+                }
+              }
+              while (checkYear < targetYear || (checkYear === targetYear && checkMonth <= targetMonth)) {
+                if (checkYear === targetYear && checkMonth === targetMonth) { isDue = true; break; }
+                checkMonth += recMonths;
+                if (checkMonth > 11) {
+                  checkYear += Math.floor(checkMonth / 12);
+                  checkMonth = checkMonth % 12;
+                }
+              }
+            }
+
+            if (isDue) {
+              totalCOP += amount;
+              itemsCount++;
+              if (byPillar[task.domain] !== undefined) byPillar[task.domain] += amount;
+              byProperty[propName] = (byProperty[propName] || 0) + amount;
+            }
+          });
+
+          monthBuckets.push({
+            month: monthLabel,
+            amountCOP: totalCOP,
+            itemsCount,
+            byPillar,
+            byProperty
+          });
+        }
+        return monthBuckets;
+      }, [tasks]);
+
+      const calendarMonthData = useMemo(() => {
+        const year = calendarCurrentDate.getFullYear();
+        const month = calendarCurrentDate.getMonth();
+        const firstDayIndex = new Date(year, month, 1).getDay();
+        const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+
+        const dayTasksMap = {};
+        for (let d = 1; d <= totalDaysInMonth; d++) dayTasksMap[d] = [];
+
+        tasks.forEach(task => {
+          const due = new Date(task.dueDate);
+          const recMonths = RECURRENCE_TYPES[task.recurrence]?.months || 0;
+
+          if (recMonths === 0) {
+            if (due.getFullYear() === year && due.getMonth() === month) {
+              const d = due.getDate();
+              if (dayTasksMap[d]) dayTasksMap[d].push(task);
+            }
+          } else {
+            const targetDay = Number(task.dueDayOfMonth) || 15;
+            const clampedDay = Math.min(targetDay, totalDaysInMonth);
+            let isDueInMonth = false;
+
+            if (task.recurrence === 'ANNUAL') {
+              const targetMonth = task.dueMonth !== undefined ? task.dueMonth : due.getMonth();
+              if (targetMonth === month) isDueInMonth = true;
+            } else if (task.recurrence === 'SEMI_ANNUAL') {
+              const targetMonth = task.dueMonth !== undefined ? task.dueMonth : due.getMonth();
+              if (targetMonth % 6 === month % 6) isDueInMonth = true;
+            } else if (task.recurrence === 'QUARTERLY') {
+              const targetMonth = task.dueMonth !== undefined ? task.dueMonth : due.getMonth();
+              if (targetMonth % 3 === month % 3) isDueInMonth = true;
+            } else if (task.recurrence === 'BI_MONTHLY') {
+              if (month % 2 === due.getMonth() % 2) isDueInMonth = true;
+            } else if (task.recurrence === 'MONTHLY') {
+              isDueInMonth = true;
+            }
+
+            if (isDueInMonth && dayTasksMap[clampedDay]) {
+              dayTasksMap[clampedDay].push(task);
+            }
+          }
+        });
+
+        return {
+          year,
+          month,
+          firstDayIndex,
+          totalDaysInMonth,
+          dayTasksMap,
+          monthName: calendarCurrentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+        };
+      }, [tasks, calendarCurrentDate]);
+
+      const selectedDayAgendaTasks = calendarMonthData.dayTasksMap[selectedCalendarDay] || [];
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
+          
+          {/* TOP NAVBAR */}
+          <header className="border-b border-slate-800 bg-slate-900/95 backdrop-blur-md sticky top-0 z-30">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-gradient-to-tr from-amber-500 via-emerald-500 to-blue-600 rounded-xl text-white shadow-lg">
+                  <Icon name="building-2" className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h1 className="font-bold text-base sm:text-lg tracking-tight text-white">COLOMBIA COMMITMENTS</h1>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/30">
+                      COT UTC-5
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">Properties, Businesses & Family Manager</p>
+                </div>
+              </div>
+
+              <div className="flex items-center flex-wrap gap-2 justify-between md:justify-end">
+                <button
+                  onClick={() => setIsPresetsOpen(true)}
+                  className="flex items-center space-x-1 px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-xl text-xs font-semibold transition"
+                >
+                  <Icon name="zap" className="w-3.5 h-3.5" />
+                  <span>Presets</span>
+                </button>
+
+                <div className="flex items-center bg-slate-800 border border-slate-700/60 rounded-xl p-0.5 text-xs">
+                  {['USD', 'COP', 'EUR', 'QAR'].map(curr => (
+                    <button
+                      key={curr}
+                      onClick={() => setActiveCurrency(curr)}
+                      className={`px-2 py-1 rounded-lg font-semibold transition ${
+                        activeCurrency === curr ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {curr}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition ${
+                    firebaseStatus === 'CONNECTED'
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400'
+                      : 'bg-amber-950/50 border-amber-500/40 text-amber-400'
+                  }`}
+                >
+                  <Icon name="settings" className="w-3.5 h-3.5" />
+                  <span>{firebaseStatus === 'CONNECTED' ? 'Cloud Synced' : 'Cloud Setup'}</span>
+                </button>
+
+                <button
+                  onClick={() => { setEditingTask(null); setIsModalOpen(true); }}
+                  className="flex items-center space-x-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-bold rounded-xl text-xs shadow-md active:scale-95 transition"
+                >
+                  <Icon name="plus" className="w-4 h-4" />
+                  <span>Add</span>
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* TOAST NOTIFICATION */}
+          {toastMessage && (
+            <div className="fixed bottom-5 right-5 left-5 sm:left-auto z-50">
+              <div className={`flex items-center space-x-2 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold ${
+                toastMessage.type === 'success' ? 'bg-emerald-900 border-emerald-500 text-emerald-100' :
+                toastMessage.type === 'error' ? 'bg-rose-900 border-rose-500 text-rose-100' :
+                'bg-slate-800 border-slate-600 text-slate-100'
+              }`}>
+                <Icon name="sparkles" className="w-4 h-4 text-emerald-400" />
+                <span>{toastMessage.msg}</span>
+              </div>
+            </div>
+          )}
+
+          {/* MAIN CONTENT */}
+          <main className="max-w-7xl mx-auto px-4 pt-5 space-y-5">
+
+            {/* NAVIGATION TABS */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
+                {[
+                  { id: 'dashboard', label: 'Dashboard', icon: 'layers' },
+                  { id: 'commitments', label: `Tasks (${tasks.filter(t => t.status !== 'COMPLETED').length})`, icon: 'clock' },
+                  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+                  { id: 'projections', label: '12-Mo Forecast', icon: 'trending-up' },
+                  { id: 'analytics', label: 'Exposure', icon: 'pie-chart' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+                      activeTab === tab.id
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                    }`}
+                  >
+                    <Icon name={tab.icon} className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative self-end sm:self-auto">
+                <button
+                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  <Icon name="file-spreadsheet" className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Export CSV</span>
+                </button>
+                {isExportMenuOpen && (
+                  <div className="absolute right-0 top-10 z-40 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-1.5 space-y-1 w-48 text-xs">
+                    <button onClick={() => { exportCommitmentsToCSV(tasks, fxRates); setIsExportMenuOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200">
+                      Commitments CSV
+                    </button>
+                    <button onClick={() => { exportPaymentHistoryToCSV(tasks, fxRates); setIsExportMenuOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200">
+                      Payment History CSV
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* --- TAB 1: DASHBOARD --- */}
+            {activeTab === 'dashboard' && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                    <div className="text-[10px] font-bold uppercase text-slate-400">This Month Outlay</div>
+                    <div className="text-lg sm:text-xl font-bold text-emerald-400 mt-1">
+                      {formatCurrency(currentMonthAnalytics.totalMonthCOP, activeCurrency, fxRates)}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{currentMonthAnalytics.itemsCount} due this month</div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Overdue Items</div>
+                    <div className="text-lg sm:text-xl font-bold text-rose-400 mt-1">
+                      {tasks.filter(t => t.status !== 'COMPLETED' && getColombiaTimeInfo(t.dueDate).isOverdue).length}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Immediate attention</div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Active Rules</div>
+                    <div className="text-lg sm:text-xl font-bold text-blue-400 mt-1">
+                      {tasks.filter(t => t.status !== 'COMPLETED').length}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Tracked commitments</div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Properties & Entities</div>
+                    <div className="text-lg sm:text-xl font-bold text-amber-400 mt-1">
+                      {propertyNamesList.length}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Active locations</div>
+                  </div>
+                </div>
+
+                {/* PILLAR CARDS */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {Object.values(DOMAINS).map(dom => {
+                    const domTasks = tasks.filter(t => t.domain === dom.id && t.status !== 'COMPLETED');
+                    const domCOP = domTasks.reduce((acc, t) => acc + (Number(t.amountCOP) || 0), 0);
+                    return (
+                      <div key={dom.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className={`flex items-center gap-1.5 text-xs font-bold ${dom.text}`}>
+                            <Icon name={dom.icon} className="w-4 h-4" />
+                            {dom.label}
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-950 text-slate-400">
+                            {domTasks.length}
+                          </span>
+                        </div>
+                        <div className="text-base font-bold text-white">
+                          {formatCurrency(domCOP, activeCurrency, fxRates)}
+                        </div>
+                        <button
+                          onClick={() => { setSelectedDomain(dom.id); setActiveTab('commitments'); }}
+                          className="w-full text-center text-xs font-semibold py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                        >
+                          Filter {dom.label} →
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* UPCOMING LIST */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h3 className="font-bold text-sm text-white">Next Upcoming Deadlines</h3>
+                    <button onClick={() => setActiveTab('commitments')} className="text-xs text-emerald-400 font-semibold">
+                      See All →
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {tasks
+                      .filter(t => t.status !== 'COMPLETED')
+                      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+                      .slice(0, 5)
+                      .map(task => {
+                        const domInfo = DOMAINS[task.domain] || DOMAINS.PROPERTIES;
+                        const cotInfo = getColombiaTimeInfo(task.dueDate);
+                        return (
+                          <div key={task.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-start space-x-3">
+                              <div className={`p-2 rounded-lg ${domInfo.bg} ${domInfo.text} border ${domInfo.border}`}>
+                                <Icon name={domInfo.icon} className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <div className="font-bold text-xs sm:text-sm text-white">{task.title}</div>
+                                <div className="text-[11px] text-slate-400">
+                                  {task.propertyName || task.location} • {task.subCategory}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between sm:justify-end space-x-3 border-t sm:border-t-0 border-slate-800/80 pt-2 sm:pt-0">
+                              <div className="text-left sm:text-right">
+                                <div className="font-bold text-emerald-400 text-xs sm:text-sm">
+                                  {formatCurrency(task.amountCOP, activeCurrency, fxRates)}
+                                </div>
+                                <div className={`text-[10px] font-bold ${cotInfo.isOverdue ? 'text-rose-400' : 'text-amber-400'}`}>
+                                  {cotInfo.isOverdue ? `OVERDUE (${cotInfo.days}d)` : `Due in ${cotInfo.days}d ${cotInfo.hours}h`}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center space-x-1.5">
+                                {task.paymentUrl && (
+                                  <a
+                                    href={task.paymentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1.5 bg-blue-500/20 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1"
+                                  >
+                                    PSE <Icon name="arrow-up-right" className="w-3 h-3" />
+                                  </a>
+                                )}
+                                <button
+                                  onClick={() => setPayingTask(task)}
+                                  className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs"
+                                >
+                                  Pay
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* --- TAB 2: COMMITMENTS LIST --- */}
+            {activeTab === 'commitments' && (
+              <div className="space-y-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row gap-2.5">
+                  <input
+                    type="text"
+                    placeholder="Search title, property, city..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedDomain}
+                      onChange={e => setSelectedDomain(e.target.value)}
+                      className="flex-1 sm:flex-none bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs"
+                    >
+                      <option value="ALL">All Pillars</option>
+                      {Object.values(DOMAINS).map(d => (
+                        <option key={d.id} value={d.id}>{d.label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={selectedStatus}
+                      onChange={e => setSelectedStatus(e.target.value)}
+                      className="flex-1 sm:flex-none bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs"
+                    >
+                      <option value="ACTIVE">Pending</option>
+                      <option value="COMPLETED">Paid / Archived</option>
+                      <option value="ALL">All</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5">
+                  {filteredTasks.map(task => {
+                    const domInfo = DOMAINS[task.domain] || DOMAINS.PROPERTIES;
+                    const cotInfo = getColombiaTimeInfo(task.dueDate);
+                    const isPaid = task.status === 'COMPLETED';
+                    return (
+                      <div key={task.id} className={`p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 ${isPaid ? 'opacity-60' : ''}`}>
+                        <div className="flex items-start space-x-3">
+                          <div className={`p-2 rounded-xl ${domInfo.bg} ${domInfo.text} border ${domInfo.border}`}>
+                            <Icon name={domInfo.icon} className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center flex-wrap gap-1.5">
+                              <h4 className="font-bold text-sm text-white">{task.title}</h4>
+                              {task.recurrence && task.recurrence !== 'NONE' && (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                  {task.recurrence} (Day {task.dueDayOfMonth})
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              <span className="text-slate-200 font-semibold">{task.propertyName || task.location}</span> • {task.subCategory}
+                            </div>
+                            {task.notes && <div className="text-[11px] text-slate-500 mt-1">{task.notes}</div>}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between md:justify-end space-x-3 border-t md:border-t-0 border-slate-800 pt-2.5 md:pt-0">
+                          <div className="text-left md:text-right">
+                            <div className="font-bold text-base text-emerald-400">
+                              {formatCurrency(task.amountCOP, activeCurrency, fxRates)}
+                            </div>
+                            <div className="text-[10px] text-slate-400">{cotInfo.formattedCOT}</div>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5">
+                            {task.paymentUrl && (
+                              <a href={task.paymentUrl} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1.5 bg-blue-500/20 text-blue-400 rounded-xl text-xs font-bold">
+                                PSE
+                              </a>
+                            )}
+                            {!isPaid && (
+                              <button onClick={() => setPayingTask(task)} className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs">
+                                Mark Paid
+                              </button>
+                            )}
+                            {(task.paymentHistory || []).length > 0 && (
+                              <button onClick={() => setHistoryModalTask(task)} className="p-1.5 bg-slate-950 text-slate-400 rounded-xl border border-slate-800">
+                                <Icon name="history" className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button onClick={() => { setEditingTask(task); setIsModalOpen(true); }} className="p-1.5 bg-slate-950 text-slate-400 rounded-xl border border-slate-800">
+                              <Icon name="edit-3" className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => deleteTaskFromStore(task.id)} className="p-1.5 bg-slate-950 text-rose-400 rounded-xl border border-slate-800">
+                              <Icon name="trash-2" className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* --- TAB 3: CALENDAR VIEW --- */}
+            {activeTab === 'calendar' && (
+              <div className="space-y-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="font-bold text-base text-white">{calendarMonthData.monthName}</h2>
+                    <p className="text-[11px] text-slate-400">Tap any day to view due commitments</p>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={() => {
+                        setCalendarCurrentDate(new Date(calendarCurrentDate.getFullYear(), calendarCurrentDate.getMonth() - 1, 1));
+                        setSelectedCalendarDay(1);
+                      }}
+                      className="p-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300"
+                    >
+                      <Icon name="chevron-left" className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const now = new Date();
+                        setCalendarCurrentDate(now);
+                        setSelectedCalendarDay(now.getDate());
+                      }}
+                      className="px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold rounded-xl"
+                    >
+                      Today
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCalendarCurrentDate(new Date(calendarCurrentDate.getFullYear(), calendarCurrentDate.getMonth() + 1, 1));
+                        setSelectedCalendarDay(1);
+                      }}
+                      className="p-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300"
+                    >
+                      <Icon name="chevron-right" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4">
+                    <div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] text-slate-400 mb-2 uppercase">
+                      <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {Array.from({ length: calendarMonthData.firstDayIndex }).map((_, i) => (
+                        <div key={`empty-${i}`} className="min-h-[60px] bg-slate-950/30 rounded-xl opacity-20" />
+                      ))}
+                      {Array.from({ length: calendarMonthData.totalDaysInMonth }).map((_, i) => {
+                        const dayNum = i + 1;
+                        const dayTasks = calendarMonthData.dayTasksMap[dayNum] || [];
+                        const isSelected = selectedCalendarDay === dayNum;
+                        return (
+                          <div
+                            key={dayNum}
+                            onClick={() => setSelectedCalendarDay(dayNum)}
+                            className={`min-h-[60px] sm:min-h-[75px] p-1.5 rounded-xl border cursor-pointer flex flex-col justify-between ${
+                              isSelected ? 'bg-emerald-950/40 border-emerald-500' : 'bg-slate-950/70 border-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className={`text-xs font-bold ${isSelected ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
+                              {dayTasks.length > 0 && (
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                              )}
+                            </div>
+                            <div className="space-y-0.5 overflow-hidden">
+                              {dayTasks.slice(0, 2).map((t, idx) => (
+                                <div key={idx} className="text-[9px] truncate px-1 rounded bg-slate-800 text-slate-200">
+                                  {t.title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <div className="border-b border-slate-800 pb-2.5 flex justify-between items-center">
+                      <h3 className="font-bold text-sm text-white">
+                        {calendarCurrentDate.toLocaleString('en-US', { month: 'short' })} {selectedCalendarDay} Agenda
+                      </h3>
+                      <span className="text-xs font-bold text-emerald-400">{selectedDayAgendaTasks.length} Due</span>
+                    </div>
+
+                    {selectedDayAgendaTasks.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-8 text-center">No commitments due on this date.</p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {selectedDayAgendaTasks.map(task => (
+                          <div key={task.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                            <div className="font-bold text-xs text-white">{task.title}</div>
+                            <div className="text-[11px] text-slate-400">{task.propertyName || task.location}</div>
+                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-800">
+                              <span className="font-bold text-xs text-emerald-400">{formatCurrency(task.amountCOP, activeCurrency, fxRates)}</span>
+                              <button onClick={() => setPayingTask(task)} className="px-2.5 py-1 bg-emerald-500 text-slate-950 font-bold rounded-lg text-[10px]">
+                                Pay
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* --- TAB 4: 12-MONTH PROJECTIONS --- */}
+            {activeTab === 'projections' && (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h2 className="font-bold text-base text-white">12-Month Outlay Forecast</h2>
+                    <p className="text-xs text-slate-400">Projected cash flow requirements across upcoming cycles</p>
+                  </div>
+                  <div className="flex space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs self-start">
+                    {['PILLAR', 'PROPERTY'].map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setProjectionsGroupMode(mode)}
+                        className={`px-3 py-1 rounded-lg font-bold ${projectionsGroupMode === mode ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* VISUAL STACKED BARS (PURE CSS/TAILWIND FOR ZERO CRASHES ON MOBILE) */}
+                <div className="space-y-3 pt-2">
+                  {projectionDataDetailed.map((row, idx) => {
+                    const maxMonthCOP = Math.max(...projectionDataDetailed.map(r => r.amountCOP), 1);
+                    const totalPct = Math.round((row.amountCOP / maxMonthCOP) * 100);
+                    return (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="font-bold text-white">{row.month} <span className="text-slate-500 font-normal">({row.itemsCount} items)</span></span>
+                          <span className="font-bold text-emerald-400">{formatCurrency(row.amountCOP, activeCurrency, fxRates)}</span>
+                        </div>
+                        <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
+                          {projectionsGroupMode === 'PILLAR' ? (
+                            <>
+                              <div style={{ width: `${(row.byPillar.PROPERTIES / maxMonthCOP) * 100}%` }} className="bg-emerald-500 h-full" title="Properties" />
+                              <div style={{ width: `${(row.byPillar.BUSINESSES / maxMonthCOP) * 100}%` }} className="bg-blue-500 h-full" title="Businesses" />
+                              <div style={{ width: `${(row.byPillar.COMMITMENTS / maxMonthCOP) * 100}%` }} className="bg-amber-500 h-full" title="Legal/Financial" />
+                              <div style={{ width: `${(row.byPillar.FAMILY / maxMonthCOP) * 100}%` }} className="bg-pink-500 h-full" title="Family" />
+                            </>
+                          ) : (
+                            <div style={{ width: `${totalPct}%` }} className="bg-gradient-to-r from-emerald-500 to-blue-500 h-full" />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {projectionsGroupMode === 'PILLAR' && (
+                  <div className="flex flex-wrap gap-3 pt-2 text-[11px] text-slate-400 border-t border-slate-800">
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Properties</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Businesses</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Legal/Financial</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-pink-500" /> Family</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* --- TAB 5: CURRENT MONTH EXPOSURE --- */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                      {currentMonthAnalytics.monthName}
+                    </span>
+                    <h2 className="text-lg font-bold text-white mt-1">Current Month Financial Exposure</h2>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <div className="text-[10px] text-slate-400 uppercase">Total Active Cycle</div>
+                    <div className="text-2xl font-bold text-emerald-400">
+                      {formatCurrency(currentMonthAnalytics.totalMonthCOP, activeCurrency, fxRates)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                    <h3 className="font-bold text-sm text-white">By Pillar Domain</h3>
+                    {Object.values(DOMAINS).map(dom => {
+                      const amt = currentMonthAnalytics.byPillar[dom.id] || 0;
+                      const pct = currentMonthAnalytics.totalMonthCOP > 0 ? Math.round((amt / currentMonthAnalytics.totalMonthCOP) * 100) : 0;
+                      return (
+                        <div key={dom.id} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className={`font-semibold ${dom.text}`}>{dom.label}</span>
+                            <span className="font-bold text-white">{formatCurrency(amt, activeCurrency, fxRates)} ({pct}%)</span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: dom.color }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                    <h3 className="font-bold text-sm text-white">By Property / Asset</h3>
+                    {Object.entries(currentMonthAnalytics.byProperty).map(([propName, amt]) => {
+                      const pct = currentMonthAnalytics.totalMonthCOP > 0 ? Math.round((amt / currentMonthAnalytics.totalMonthCOP) * 100) : 0;
+                      return (
+                        <div key={propName} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="font-semibold text-slate-200 truncate max-w-[180px]">{propName}</span>
+                            <span className="font-bold text-emerald-400">{formatCurrency(amt, activeCurrency, fxRates)} ({pct}%)</span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* --- MODALS --- */}
+          {isModalOpen && (
+            <TaskFormModal task={editingTask} onClose={() => setIsModalOpen(false)} onSave={handleSaveTask} />
+          )}
+
+          {payingTask && (
+            <PayConfirmModal task={payingTask} onClose={() => setPayingTask(null)} onConfirm={handleConfirmPayment} />
+          )}
+
+          {isPresetsOpen && (
+            <PresetsModal onClose={() => setIsPresetsOpen(false)} onSelectPreset={handleLoadPresets} />
+          )}
+
+          {historyModalTask && (
+            <PaymentHistoryModal task={historyModalTask} onClose={() => setHistoryModalTask(null)} />
+          )}
+
+          {isSettingsOpen && (
+            <SettingsModal
+              config={localStorage.getItem('firebase_custom_config') || ''}
+              status={firebaseStatus}
+              onClose={() => setIsSettingsOpen(false)}
+              onSaveConfig={(cfg) => {
+                try {
+                  if (cfg.trim() === '') {
+                    localStorage.removeItem('firebase_custom_config');
+                  } else {
+                    JSON.parse(cfg);
+                    localStorage.setItem('firebase_custom_config', cfg);
+                  }
+                  showToast('Saved config. Reloading...', 'success');
+                  setTimeout(() => window.location.reload(), 900);
+                } catch (e) {
+                  showToast('Invalid JSON format. Check your Firebase snippet.', 'error');
+                }
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // --- MODAL COMPONENTS ---
+    function TaskFormModal({ task, onClose, onSave }) {
+      const [formData, setFormData] = useState({
+        title: task?.title || '',
+        domain: task?.domain || 'PROPERTIES',
+        propertyName: task?.propertyName || task?.location || 'Cartagena - Palmetto Sunset',
+        subCategory: task?.subCategory || 'Maintenance & Repairs',
+        location: task?.location || 'Cartagena',
+        amountCOP: task?.amountCOP || '',
+        paymentUrl: task?.paymentUrl || '',
+        dueDate: task?.dueDate ? new Date(task.dueDate).toISOString().slice(0, 16) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+        recurrence: task?.recurrence || 'NONE',
+        dueDayOfMonth: task?.dueDayOfMonth || 15,
+        dueMonth: task?.dueMonth !== undefined ? task.dueMonth : new Date().getMonth(),
+        priority: task?.priority || 'MEDIUM',
+        notes: task?.notes || ''
+      });
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.title) return;
+        let computedDueDate = formData.dueDate;
+
+        if (formData.recurrence !== 'NONE') {
+          const now = new Date();
+          let targetYear = now.getFullYear();
+          let targetMonth = (formData.recurrence === 'ANNUAL' || formData.recurrence === 'SEMI_ANNUAL')
+            ? formData.dueMonth
+            : now.getMonth();
+          const targetDay = formData.dueDayOfMonth || 15;
+          const candidate = new Date(targetYear, targetMonth, targetDay, 23, 59, 59);
+          if (candidate < now && formData.recurrence === 'ANNUAL') targetYear += 1;
+          const maxDays = new Date(targetYear, targetMonth + 1, 0).getDate();
+          computedDueDate = new Date(targetYear, targetMonth, Math.min(targetDay, maxDays), 23, 59, 59).toISOString();
+        } else {
+          computedDueDate = new Date(formData.dueDate).toISOString();
+        }
+
+        onSave({ ...formData, dueDate: computedDueDate });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm">{task?.id ? 'Edit Commitment' : 'Add Commitment / Expense'}</h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white p-1"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-4 space-y-3 text-xs text-slate-300 max-h-[82vh] overflow-y-auto">
+              <div>
+                <label className="block font-semibold mb-1 text-slate-200">Commitment Title *</label>
+                <input type="text" required placeholder="e.g. Afinia Power, A/C Repair, Predial" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-200">Pillar</label>
+                  <select value={formData.domain} onChange={e => setFormData({ ...formData, domain: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white">
+                    {Object.values(DOMAINS).map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-200">Property / Asset</label>
+                  <input type="text" value={formData.propertyName} onChange={e => setFormData({ ...formData, propertyName: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-200">Amount (COP)</label>
+                  <input type="number" placeholder="520000" value={formData.amountCOP} onChange={e => setFormData({ ...formData, amountCOP: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-200">Category</label>
+                  <input type="text" value={formData.subCategory} onChange={e => setFormData({ ...formData, subCategory: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2.5">
+                <div className="font-bold text-emerald-400">Recurrence & Deadline Anchor</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block mb-1 text-slate-300">Frequency</label>
+                    <select value={formData.recurrence} onChange={e => setFormData({ ...formData, recurrence: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
+                      {Object.entries(RECURRENCE_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select>
+                  </div>
+                  {formData.recurrence === 'NONE' ? (
+                    <div>
+                      <label className="block mb-1 text-slate-300">Due Date</label>
+                      <input type="datetime-local" value={formData.dueDate} onChange={e => setFormData({ ...formData, dueDate: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white" />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {(formData.recurrence === 'ANNUAL' || formData.recurrence === 'SEMI_ANNUAL') && (
+                        <div>
+                          <label className="block mb-1 text-slate-300">Month</label>
+                          <select value={formData.dueMonth} onChange={e => setFormData({ ...formData, dueMonth: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white">
+                            {MONTH_NAMES.map((m, idx) => <option key={idx} value={idx}>{m.slice(0, 3)}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      <div>
+                        <label className="block mb-1 text-slate-300">Day</label>
+                        <input type="number" min="1" max="31" value={formData.dueDayOfMonth} onChange={e => setFormData({ ...formData, dueDayOfMonth: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1 text-slate-200">Payment URL / PSE (Optional)</label>
+                <input type="url" placeholder="https://..." value={formData.paymentUrl} onChange={e => setFormData({ ...formData, paymentUrl: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1 text-slate-200">Notes</label>
+                <input type="text" placeholder="NIC, Contract #, reference notes..." value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+                <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function PayConfirmModal({ task, onClose, onConfirm }) {
+      const [actualAmount, setActualAmount] = useState(task.amountCOP || '');
+      const [refNotes, setRefNotes] = useState('');
+      const [updateBaseAmount, setUpdateBaseAmount] = useState(false);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onConfirm({ actualAmountCOP: Number(actualAmount), refNotes, updateBaseAmount });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm">Log Payment & Advance Cycle</h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs text-slate-300">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <div className="font-bold text-white text-sm">{task.title}</div>
+                <div className="text-emerald-400 mt-0.5">{task.propertyName || task.location}</div>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1 text-slate-200">Actual Amount Paid (COP)</label>
+                <input type="number" required value={actualAmount} onChange={e => setActualAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold text-base" />
+              </div>
+              {task.recurrence && task.recurrence !== 'NONE' && (
+                <label className="flex items-center space-x-2 text-slate-300">
+                  <input type="checkbox" checked={updateBaseAmount} onChange={e => setUpdateBaseAmount(e.target.checked)} />
+                  <span>Update future estimate to {formatCOP(actualAmount)}</span>
+                </label>
+              )}
+              <div>
+                <label className="block font-semibold mb-1 text-slate-200">Confirmation / Reference #</label>
+                <input type="text" placeholder="PSE #90218..." value={refNotes} onChange={e => setRefNotes(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" />
+              </div>
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+                <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl">Confirm Payment</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function PresetsModal({ onClose, onSelectPreset }) {
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm">Colombia Utility & Tax Presets</h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto text-xs text-slate-300">
+              {PRESET_COLOMBIA_TEMPLATES.map((cat, idx) => (
+                <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-white">{cat.category}</span>
+                    <button onClick={() => onSelectPreset(cat.items)} className="px-2.5 py-1 bg-emerald-500 text-slate-950 font-bold rounded-lg">
+                      Load All ({cat.items.length})
+                    </button>
+                  </div>
+                  {cat.items.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between bg-slate-900 p-2 rounded-lg">
+                      <div>
+                        <div className="font-semibold text-white">{item.title}</div>
+                        <div className="text-[10px] text-slate-400">Day {item.dueDayOfMonth} • {item.recurrence}</div>
+                      </div>
+                      <button onClick={() => onSelectPreset([item])} className="text-emerald-400 font-bold hover:underline">+ Add</button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PaymentHistoryModal({ task, onClose }) {
+      const history = task.paymentHistory || [];
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm">Payment History: {task.title}</h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto text-xs">
+              {history.map(r => (
+                <div key={r.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center">
+                  <div>
+                    <div className="font-bold text-white">{new Date(r.paidAt).toLocaleDateString()}</div>
+                    <div className="text-[10px] text-slate-400">{r.refNotes}</div>
+                  </div>
+                  <div className="font-bold text-emerald-400">{formatCOP(r.amountCOP)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsModal({ config, status, onClose, onSaveConfig }) {
+      const [inputConfig, setInputConfig] = useState(config || '');
+
+      const handlePasteFormat = (raw) => {
+        // Auto-extract JSON object even if user pastes the full JS const firebaseConfig = { ... }; snippet
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (match) {
+          try {
+            // Convert unquoted JS object keys into valid JSON
+            const fixedJson = match[0]
+              .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2": ')
+              .replace(/'/g, '"')
+              .replace(/,\s*\}/g, '}');
+            JSON.parse(fixedJson);
+            setInputConfig(fixedJson);
+            return;
+          } catch (e) {}
+        }
+        setInputConfig(raw);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm">Firebase Cloud Sync Setup</h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4 text-xs text-slate-300">
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+                <span>Sync Status:</span>
+                <span className={`font-bold ${status === 'CONNECTED' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {status === 'CONNECTED' ? '● Connected to Firebase Cloud' : '● Local Device Storage Only'}
+                </span>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1 text-slate-200">
+                  Paste your Firebase Config (from Firebase Project Settings)
+                </label>
+                <textarea
+                  rows={6}
+                  placeholder='Paste your firebaseConfig object here...'
+                  value={inputConfig}
+                  onChange={e => handlePasteFormat(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-emerald-400 font-mono text-[11px]"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  You can paste the raw snippet directly from Firebase Console; it will format automatically.
+                </p>
+              </div>
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+                <button onClick={onClose} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold">Close</button>
+                <button onClick={() => onSaveConfig(inputConfig)} className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl">
+                  Save & Connect
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
